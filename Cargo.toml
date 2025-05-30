@@ -1,0 +1,19 @@
+[package]
+name = "qwik-analyzer"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "test_analyzer"
+path = "examples/simple_test.rs"
+
+[dependencies]
+oxc_allocator = "0.72.1"
+oxc_ast = "0.72.1"
+oxc_parser = "0.72.1"
+oxc_semantic = "0.72.1"
+oxc_span = "0.72.1"
+oxc_syntax = "0.72.1"
+oxc_codegen = "0.72.1"
+oxc_transformer = "0.72.1"
+
