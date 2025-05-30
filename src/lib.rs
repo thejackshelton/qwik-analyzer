@@ -1,6 +1,4 @@
-pub mod ast_utils;
 pub mod component_analyzer;
-pub mod jsx_transform;
 pub mod qwik_analyzer;
 
 pub use qwik_analyzer::QwikAnalyzer;

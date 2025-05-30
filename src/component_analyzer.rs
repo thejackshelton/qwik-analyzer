@@ -1,8 +1,8 @@
 use oxc_allocator::Allocator;
-use oxc_ast::ast::{ImportDeclaration, JSXElement};
+use oxc_ast::ast::JSXElement;
 use oxc_ast::AstKind;
 use oxc_parser;
-use oxc_semantic::{Semantic, SemanticBuilder};
+use oxc_semantic::Semantic;
 use oxc_span;
 use std::fs;
 use std::path::Path;
