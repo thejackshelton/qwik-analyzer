@@ -4,7 +4,7 @@ import { LuCheck } from "@qwikest/icons/lucide";
 import styles from "./checkbox.css?inline";
 import { Heyo } from "./Heyo";
 
-export default component$(() => {
+export default component$(() => {j
   useStyles$(styles);
 
   return (

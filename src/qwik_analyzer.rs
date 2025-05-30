@@ -17,32 +17,8 @@ impl QwikAnalyzer {
             println!("[qwik-analyzer] Analyzing file: {}", file_path.display());
         }
 
-        let source_text = std::fs::read_to_string(file_path)?;
-
-        // Test parsing the file
-        parse_file_with_semantic(&source_text, file_path)?;
-
-        // Check if file imports from the target package
-        let imports_target_package =
-            component_analyzer::check_imports_from_package(&source_text, "@kunai-consulting/qwik");
-
-        if !imports_target_package {
-            if self.debug_mode {
-                println!("[qwik-analyzer] No imports from target package, skipping");
-            }
-            return Ok(AnalysisResult {
-                has_description: false,
-                found_directly: false,
-                candidate_components: Vec::new(),
-            });
-        }
-
-        // Look for Checkbox.Description within Checkbox.Root
-        let result = component_analyzer::find_component_within_parent(
-            &source_text,
-            "Checkbox.Root",
-            "Description",
-        );
+        // Use semantic analysis instead of string-based analysis
+        let result = component_analyzer::analyze_file_with_semantics(file_path)?;
 
         if self.debug_mode {
             println!(

@@ -6,9 +6,8 @@ pub mod qwik_analyzer;
 pub use qwik_analyzer::QwikAnalyzer;
 
 use oxc_allocator::Allocator;
-use oxc_ast::ast::Program;
 use oxc_parser::{Parser, ParserReturn};
-use oxc_semantic::{SemanticBuilder, SemanticBuilderReturn};
+use oxc_semantic::SemanticBuilder;
 use oxc_span::SourceType;
 use std::path::Path;
 
