@@ -177,7 +177,22 @@ pub fn analyze_file_with_semantics(file_path: &Path) -> Result<AnalysisResult> {
     }
 
     // Look for Checkbox.Description within Checkbox.Root
-    let result = find_component_within_parent_semantic(&semantic, "Checkbox.Root", "Description");
+    let mut result =
+        find_component_within_parent_semantic(&semantic, "Checkbox.Root", "Description");
+
+    // If not found directly, perform indirect analysis
+    if !result.has_description && !result.candidate_components.is_empty() {
+        println!("🔄 Starting indirect analysis...");
+
+        // Resolve import sources for candidate components
+        resolve_import_sources_semantic(&semantic, &mut result.candidate_components);
+
+        // Recursively analyze candidate components
+        if find_indirect_components(&mut result.candidate_components, file_path)? {
+            result.has_description = true;
+            println!("✅ Found Checkbox.Description through indirect analysis!");
+        }
+    }
 
     Ok(result)
 }
@@ -202,18 +217,189 @@ pub fn find_component_within_parent(
     }
 }
 
-pub fn resolve_import_sources(
-    _source_text: &str,
-    _candidate_components: &mut [CandidateComponent],
+/// Resolve import sources for candidate components using semantic analysis
+pub fn resolve_import_sources_semantic(
+    semantic: &Semantic,
+    candidate_components: &mut [CandidateComponent],
 ) {
-    // TODO: Use semantic analysis to find symbol references and their import sources
+    println!(
+        "🔍 Resolving import sources for {} candidates",
+        candidate_components.len()
+    );
+
+    // Walk through all nodes to find import declarations
+    for node in semantic.nodes().iter() {
+        if let AstKind::ImportDeclaration(import_decl) = node.kind() {
+            let import_source = import_decl.source.value.to_string();
+            println!("📦 Processing import from: '{}'", import_source);
+
+            // Check each import specifier
+            if let Some(specifiers) = &import_decl.specifiers {
+                for specifier in specifiers {
+                    match specifier {
+                        oxc_ast::ast::ImportDeclarationSpecifier::ImportSpecifier(spec) => {
+                            let imported_name = spec.local.name.to_string();
+                            println!("   - Named import: '{}'", imported_name);
+
+                            // Find matching candidate component
+                            for candidate in candidate_components.iter_mut() {
+                                if candidate.component_name == imported_name {
+                                    println!(
+                                        "✅ Matched '{}' to import source '{}'",
+                                        imported_name, import_source
+                                    );
+                                    candidate.import_source = Some(import_source.clone());
+                                }
+                            }
+                        }
+                        oxc_ast::ast::ImportDeclarationSpecifier::ImportDefaultSpecifier(spec) => {
+                            let imported_name = spec.local.name.to_string();
+                            println!("   - Default import: '{}'", imported_name);
+
+                            // Find matching candidate component
+                            for candidate in candidate_components.iter_mut() {
+                                if candidate.component_name == imported_name {
+                                    println!(
+                                        "✅ Matched '{}' to import source '{}'",
+                                        imported_name, import_source
+                                    );
+                                    candidate.import_source = Some(import_source.clone());
+                                }
+                            }
+                        }
+                        oxc_ast::ast::ImportDeclarationSpecifier::ImportNamespaceSpecifier(
+                            spec,
+                        ) => {
+                            let imported_name = spec.local.name.to_string();
+                            println!("   - Namespace import: '{}'", imported_name);
+
+                            // Find matching candidate component
+                            for candidate in candidate_components.iter_mut() {
+                                if candidate
+                                    .component_name
+                                    .starts_with(&format!("{}.", imported_name))
+                                {
+                                    println!(
+                                        "✅ Matched '{}' to import source '{}'",
+                                        candidate.component_name, import_source
+                                    );
+                                    candidate.import_source = Some(import_source.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    println!("📋 Import resolution complete");
 }
 
+/// Recursively analyze candidate components to find indirect Checkbox.Description usage
 pub fn find_indirect_components(
-    _candidate_components: &mut [CandidateComponent],
-    _importer: &Path,
+    candidate_components: &mut [CandidateComponent],
+    importer: &Path,
 ) -> Result<bool> {
-    Ok(false)
+    println!(
+        "🔍 Analyzing {} candidate components for indirect usage",
+        candidate_components.len()
+    );
+
+    let mut found_indirect = false;
+
+    for candidate in candidate_components.iter_mut() {
+        if let Some(import_source) = &candidate.import_source {
+            println!(
+                "📁 Checking candidate '{}' from import '{}'",
+                candidate.component_name, import_source
+            );
+
+            // Resolve the import path relative to the importer
+            if let Ok(resolved_path) = resolve_import_path(import_source, importer) {
+                candidate.resolved_path = Some(resolved_path.clone());
+
+                // Try different file extensions
+                let possible_files = vec![
+                    format!("{}.tsx", resolved_path),
+                    format!("{}.ts", resolved_path),
+                    format!("{}.jsx", resolved_path),
+                    format!("{}.js", resolved_path),
+                    format!("{}/index.tsx", resolved_path),
+                    format!("{}/index.ts", resolved_path),
+                    format!("{}/index.jsx", resolved_path),
+                    format!("{}/index.js", resolved_path),
+                ];
+
+                for file_path in possible_files {
+                    let path = Path::new(&file_path);
+                    if path.exists() {
+                        println!("📄 Found file: {}", file_path);
+
+                        // For indirect analysis, check if this component contains Checkbox.Description anywhere
+                        // Since when it's used inside Checkbox.Root, that content is in scope
+                        match analyze_component_for_description(path) {
+                            Ok(has_description) => {
+                                if has_description {
+                                    println!(
+                                        "🎯 Component '{}' provides Checkbox.Description!",
+                                        candidate.component_name
+                                    );
+                                    candidate.provides_description = true;
+                                    found_indirect = true;
+                                }
+                            }
+                            Err(e) => {
+                                println!("❌ Error analyzing {}: {}", file_path, e);
+                            }
+                        }
+                        break; // Found the file, stop trying extensions
+                    }
+                }
+            }
+        }
+    }
+
+    println!("📊 Indirect analysis complete - found: {}", found_indirect);
+    Ok(found_indirect)
+}
+
+/// Analyze a component file to see if it contains Checkbox.Description (for indirect analysis)
+fn analyze_component_for_description(file_path: &Path) -> Result<bool> {
+    let source_text = fs::read_to_string(file_path)?;
+    let allocator = Allocator::default();
+    let source_type = oxc_span::SourceType::from_path(file_path).unwrap_or_default();
+
+    // Parse the file
+    let oxc_parser::ParserReturn {
+        program, errors, ..
+    } = oxc_parser::Parser::new(&allocator, &source_text, source_type).parse();
+
+    if !errors.is_empty() {
+        eprintln!("Parser errors in {}: {:?}", file_path.display(), errors);
+    }
+
+    // Build semantic information
+    let semantic_ret = oxc_semantic::SemanticBuilder::new().build(&program);
+
+    if !semantic_ret.errors.is_empty() {
+        eprintln!(
+            "Semantic errors in {}: {:?}",
+            file_path.display(),
+            semantic_ret.errors
+        );
+    }
+
+    let semantic = semantic_ret.semantic;
+
+    // Check for imports from target package
+    if !check_imports_from_package_semantic(&semantic, "@kunai-consulting/qwik") {
+        return Ok(false);
+    }
+
+    // For indirect analysis: check if this component contains Checkbox.Description anywhere
+    // Since when used inside Checkbox.Root, the content is effectively in scope
+    Ok(contains_checkbox_description_anywhere(&semantic))
 }
 
 pub fn analyze_file_for_description(file_path: &str) -> Result<bool> {
@@ -226,10 +412,51 @@ pub fn analyze_file_for_description(file_path: &str) -> Result<bool> {
 
 fn resolve_import_path(import_source: &str, importer: &Path) -> Result<String> {
     if import_source.starts_with('.') {
+        // Relative import - resolve relative to the importing file
         let parent = importer.parent().unwrap_or(Path::new("."));
         let resolved = parent.join(import_source);
-        Ok(resolved.to_string_lossy().to_string())
-    } else {
+
+        // Normalize the path to handle .. and . components
+        if let Ok(canonical) = resolved.canonicalize() {
+            Ok(canonical.to_string_lossy().to_string())
+        } else {
+            // If canonicalize fails, try to clean up the path manually
+            Ok(resolved.to_string_lossy().to_string())
+        }
+    } else if import_source.starts_with('/') {
+        // Absolute import
         Ok(import_source.to_string())
+    } else {
+        // Module import - for now, just return as-is
+        // In a real project, this would need node_modules resolution
+        println!(
+            "⚠️  Module import '{}' - would need node_modules resolution",
+            import_source
+        );
+        Err(format!(
+            "Module import resolution not implemented: {}",
+            import_source
+        )
+        .into())
     }
+}
+
+/// Check if a file contains Checkbox.Description anywhere (for indirect analysis)
+pub fn contains_checkbox_description_anywhere(semantic: &Semantic) -> bool {
+    println!("🔍 Checking for Checkbox.Description anywhere in the file");
+
+    // Walk through all nodes to find any Checkbox.Description
+    for node in semantic.nodes().iter() {
+        if let AstKind::JSXElement(jsx_element) = node.kind() {
+            if let Some(element_name) = extract_jsx_element_name(jsx_element) {
+                if element_name == "Checkbox.Description" || element_name.contains("Description") {
+                    println!("🎯 Found Checkbox.Description anywhere: '{}'", element_name);
+                    return true;
+                }
+            }
+        }
+    }
+
+    println!("❌ No Checkbox.Description found anywhere");
+    false
 }

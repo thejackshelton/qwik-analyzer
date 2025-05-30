@@ -1,6 +1,5 @@
 import { component$, useStyles$ } from "@builder.io/qwik";
 import { Checkbox } from "@kunai-consulting/qwik";
-import { LuCheck } from "@qwikest/icons/lucide";
 import styles from "./checkbox.css?inline";
 
 export default component$(() => {
@@ -13,7 +12,7 @@ export default component$(() => {
       >
         <Checkbox.Trigger class="checkbox-trigger">
           <Checkbox.Indicator class="checkbox-indicator">
-            <LuCheck />
+            Checked
           </Checkbox.Indicator>
         </Checkbox.Trigger>
         <Checkbox.Label>I accept the Terms and Conditions</Checkbox.Label>

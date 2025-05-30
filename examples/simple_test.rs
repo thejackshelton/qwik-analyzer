@@ -2,18 +2,18 @@ use qwik_analyzer::QwikAnalyzer;
 use std::path::Path;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("🔍 Testing Qwik Analyzer");
+    println!("🔍 Testing Qwik Analyzer with Real Qwik Project");
 
-    let analyzer = QwikAnalyzer::new(true); // Enable debug mode
+    let analyzer = QwikAnalyzer::new(true);
 
-    // Test files
+    // Test files from the real Qwik project
     let test_files = [
-        ("Direct Example", "examples/test_files/direct_example.tsx"),
+        ("Direct Example", "qwik-app/src/examples/direct_example.tsx"),
         (
             "Indirect Example",
-            "examples/test_files/indirect_example.tsx",
+            "qwik-app/src/examples/indirect_example.tsx",
         ),
-        ("Heyo Component", "examples/test_files/heyo.tsx"),
+        ("Heyo Component", "qwik-app/src/examples/heyo.tsx"),
     ];
 
     for (name, file_path) in test_files {
@@ -21,12 +21,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("   Path: {}", file_path);
 
         let path = Path::new(file_path);
-
-        if !path.exists() {
-            println!("   ❌ File not found");
-            continue;
-        }
-
         match analyzer.analyze_file(path) {
             Ok(result) => {
                 println!("   ✅ Analysis complete");
@@ -38,6 +32,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     result.candidate_components.len()
                 );
 
+                for (i, candidate) in result.candidate_components.iter().enumerate() {
+                    println!(
+                        "        {}. {} (import: {:?}, provides: {})",
+                        i + 1,
+                        candidate.component_name,
+                        candidate.import_source,
+                        candidate.provides_description
+                    );
+                }
+
                 if result.has_description {
                     println!("   🎯 This file should get _staticHasDescription=true");
                 } else {
@@ -45,7 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Err(e) => {
-                println!("   ❌ Analysis failed: {}", e);
+                println!("   ❌ Error: {}", e);
             }
         }
     }
