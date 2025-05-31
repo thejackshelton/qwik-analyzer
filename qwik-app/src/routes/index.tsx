@@ -5,7 +5,7 @@ import DirectExample from "../examples/direct_example";
 
 export default component$(() => {
   return (
-    <DirectExample />
+    <IndirectExample />
   );
 });
 

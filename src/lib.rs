@@ -1,4 +1,3 @@
-use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use std::path::Path;
 
@@ -70,7 +69,7 @@ pub fn analyze_file(
 }
 
 #[napi]
-pub fn analyze_file_changed(file_path: String, event: String, module_specifier: Option<String>) {
+pub fn analyze_file_changed(file_path: String, _event: String, module_specifier: Option<String>) {
     if let Err(e) = analyze_file(file_path.clone(), module_specifier) {
         eprintln!("Error analyzing changed file {}: {}", file_path, e);
     }

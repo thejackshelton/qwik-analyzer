@@ -1,47 +1,42 @@
 use oxc_allocator::Allocator;
-use oxc_ast::ast::{CallExpression, JSXElement};
+use oxc_ast::ast::{CallExpression, JSXOpeningElement};
 use oxc_ast::AstKind;
 use oxc_parser;
+use oxc_resolver::{ResolveOptions, Resolver};
 use oxc_semantic::Semantic;
-use oxc_span;
-use std::collections::HashMap;
+use oxc_span::SourceType;
 use std::fs;
 use std::path::Path;
 
 use crate::{AnalysisResult, Result, Transformation};
 
-/// Semantic symbol information for imports
+/// Information about an isComponentPresent() call found in an imported component
 #[derive(Debug, Clone)]
-struct ImportSymbol {
-    local_name: String,
-    imported_name: String,
-    module_source: String,
-}
-
-/// Information about a component that calls isComponentPresent
-#[derive(Debug, Clone)]
-struct ComponentWithCheck {
+struct ComponentPresenceCall {
     component_name: String,
-    checks_for: String,
+    call_span_start: u32,
+    call_span_end: u32,
+    is_present_in_subtree: bool,
+    source_file: String, // The file where this call was found
 }
 
-/// Analyze a file using cross-file component-aware analysis
+/// Analyze a file using semantic analysis to find isComponentPresent calls
 pub fn analyze_file_with_semantics(
     file_path: &Path,
-    module_specifier: Option<&str>,
+    _module_specifier: Option<&str>,
 ) -> Result<AnalysisResult> {
     let source_text = fs::read_to_string(file_path)?;
-    analyze_code_with_semantics(&source_text, file_path, module_specifier)
+    analyze_code_with_semantics(&source_text, file_path, _module_specifier)
 }
 
 /// Analyze code content directly (for Vite integration)
 pub fn analyze_code_with_semantics(
     source_text: &str,
     file_path: &Path,
-    module_specifier: Option<&str>,
+    _module_specifier: Option<&str>,
 ) -> Result<AnalysisResult> {
     let allocator = Allocator::default();
-    let source_type = oxc_span::SourceType::from_path(file_path).unwrap_or_default();
+    let source_type = SourceType::from_path(file_path).unwrap_or_default();
 
     let oxc_parser::ParserReturn {
         program, errors, ..
@@ -64,207 +59,175 @@ pub fn analyze_code_with_semantics(
         eprintln!("Semantic errors: {:?}", semantic_ret.errors);
     }
 
-    println!("🔍 Building import symbol table...");
-    let import_symbols = build_import_symbol_table(semantic);
+    // Step 1: Extract JSX components used in this file
+    let jsx_components = extract_imported_jsx_components(semantic);
+    println!("🔍 Found JSX components: {:?}", jsx_components);
 
-    println!("🔍 Extracting JSX elements...");
-    let jsx_elements = extract_jsx_elements(semantic);
-
-    for element in &jsx_elements {
-        println!("🏷️  Found JSX element: '{}'", element);
+    // Step 2: For each imported component, analyze its source for isComponentPresent() calls
+    let mut all_component_calls = Vec::new();
+    for jsx_component in jsx_components {
+        if let Ok(calls) = find_is_component_present_calls_in_imported_component(semantic, &jsx_component, file_path) {
+            all_component_calls.extend(calls);
+        }
     }
 
-    println!("🔍 Analyzing imported components for isComponentPresent() calls...");
+    // Step 3: For each isComponentPresent call found, check if the target component is present in current file's JSX
+    for call in &mut all_component_calls {
+        call.is_present_in_subtree = is_component_present_in_jsx_subtree(semantic, &call.component_name, file_path)?;
+    }
 
-    // Check if this file contains isComponentPresent calls (this is a component definition)
-    let component_transformations = find_and_prepare_component_transformations(semantic);
+    println!("📊 Analysis found {} isComponentPresent calls from imported components, {} have target components in current file", 
+             all_component_calls.len(), 
+             all_component_calls.iter().filter(|c| c.is_present_in_subtree).count());
 
-    // Check if this file uses Root components (this is a consumer)
-    let (has_description, consumer_transformations) =
-        analyze_root_component_usage(semantic, &import_symbols);
+    // Step 4: Generate transformations ONLY for the current file being analyzed
+    let mut transformations = Vec::new();
+    let mut has_any_component = false;
 
-    let mut all_transformations = Vec::new();
-    all_transformations.extend(component_transformations);
-    all_transformations.extend(consumer_transformations);
+    // Check if any calls have components present in this file
+    for call in &all_component_calls {
+        if call.is_present_in_subtree {
+            has_any_component = true;
+        }
+    }
 
-    println!("📊 Analysis result: {}", has_description);
+    // Only generate transformations for the current file (JSX props)
+    if has_any_component {
+        let current_file_transformations = generate_transformations_for_current_file(semantic, &all_component_calls, file_path)?;
+        transformations.extend(current_file_transformations);
+    }
+
+    // Also check if the current file itself contains isComponentPresent calls that need transformation
+    let current_file_component_transformations = generate_transformations_for_current_file_components(semantic, file_path)?;
+    transformations.extend(current_file_component_transformations);
+
+    // NOTE: We don't include imported component transformations here
+    // Those will be handled when those files are analyzed individually by Vite
 
     Ok(AnalysisResult {
-        has_description,
+        has_description: has_any_component,
         file_path: file_path.to_string_lossy().to_string(),
         dependencies: Vec::new(),
-        transformations: all_transformations,
+        transformations,
     })
 }
 
-/// Build a symbol table of all imported symbols
-fn build_import_symbol_table(semantic: &Semantic) -> Vec<ImportSymbol> {
-    let mut symbols = Vec::new();
-
+/// Extract JSX components that are likely imported (single identifiers without dots)
+fn extract_imported_jsx_components(semantic: &Semantic) -> Vec<String> {
+    let mut components = Vec::new();
+    
     for node in semantic.nodes().iter() {
-        if let AstKind::ImportDeclaration(import_decl) = node.kind() {
-            let module_source = import_decl.source.value.to_string();
-
-            if let Some(specifiers) = &import_decl.specifiers {
-                for spec in specifiers {
-                    match spec {
-                        oxc_ast::ast::ImportDeclarationSpecifier::ImportSpecifier(spec) => {
-                            let local_name = spec.local.name.to_string();
-                            let imported_name = spec.imported.name().to_string();
-
-                            symbols.push(ImportSymbol {
-                                local_name: local_name.clone(),
-                                imported_name,
-                                module_source: module_source.clone(),
-                            });
+        if let AstKind::JSXOpeningElement(jsx_opening) = node.kind() {
+            if let Some(element_name) = extract_jsx_element_name(jsx_opening) {
+                // Look for member expressions like DummyComp.Root
+                if element_name.contains('.') {
+                    let parts: Vec<&str> = element_name.split('.').collect();
+                    if parts.len() == 2 {
+                        let component_module = parts[0];
+                        let component_name = parts[1];
+                        let full_component = format!("{}.{}", component_module, component_name);
+                        if !components.contains(&full_component) {
+                            println!("🏷️  Found imported component: {}", full_component);
+                            components.push(full_component);
                         }
-                        oxc_ast::ast::ImportDeclarationSpecifier::ImportDefaultSpecifier(spec) => {
-                            let local_name = spec.local.name.to_string();
-
-                            symbols.push(ImportSymbol {
-                                local_name: local_name.clone(),
-                                imported_name: "default".to_string(),
-                                module_source: module_source.clone(),
-                            });
-                        }
-                        oxc_ast::ast::ImportDeclarationSpecifier::ImportNamespaceSpecifier(
-                            spec,
-                        ) => {
-                            let local_name = spec.local.name.to_string();
-
-                            symbols.push(ImportSymbol {
-                                local_name: local_name.clone(),
-                                imported_name: "*".to_string(),
-                                module_source: module_source.clone(),
-                            });
-                        }
+                    }
+                }
+                // Also consider single identifiers that start with uppercase (likely components)
+                else if element_name.chars().next().map_or(false, |c| c.is_ascii_uppercase()) &&
+                        !is_html_element(&element_name) {
+                    if !components.contains(&element_name) {
+                        components.push(element_name.clone());
+                        println!("🏷️  Found imported component: {}", element_name);
                     }
                 }
             }
         }
     }
-
-    symbols
+    
+    components
 }
 
-/// Extract all JSX element names from the semantic tree
-fn extract_jsx_elements(semantic: &Semantic) -> Vec<String> {
-    let mut elements = Vec::new();
-
-    println!("🔍 Extracting JSX elements...");
-
-    for node in semantic.nodes().iter() {
-        if let AstKind::JSXElement(jsx_element) = node.kind() {
-            if let Some(element_name) = extract_jsx_element_name(jsx_element) {
-                println!("🏷️  Found JSX element: '{}'", element_name);
-                elements.push(element_name);
-            }
-        }
-    }
-
-    elements
-}
-
-/// Extract JSX element name with proper semantic resolution
-fn extract_jsx_element_name(jsx_element: &JSXElement) -> Option<String> {
-    match &jsx_element.opening_element.name {
-        oxc_ast::ast::JSXElementName::Identifier(identifier) => {
-            let name = identifier.name.to_string();
-            Some(name)
-        }
-        oxc_ast::ast::JSXElementName::IdentifierReference(identifier) => {
-            Some(identifier.name.to_string())
-        }
-        oxc_ast::ast::JSXElementName::MemberExpression(member_expr) => {
-            // Handle member expressions like DummyComp.Description
-            let object_name = extract_jsx_member_object_name(&member_expr.object)?;
-            let property_name = &member_expr.property.name;
-            Some(format!("{}.{}", object_name, property_name))
-        }
-        oxc_ast::ast::JSXElementName::NamespacedName(namespaced) => {
-            Some(format!("{}:{}", namespaced.namespace.name, namespaced.name))
-        }
-        oxc_ast::ast::JSXElementName::ThisExpression(_) => None,
-    }
-}
-
-/// Extract object name from JSX member expression with semantic resolution
-fn extract_jsx_member_object_name(
-    object: &oxc_ast::ast::JSXMemberExpressionObject,
-) -> Option<String> {
-    match object {
-        oxc_ast::ast::JSXMemberExpressionObject::IdentifierReference(identifier) => {
-            let name = identifier.name.to_string();
-            Some(name)
-        }
-        oxc_ast::ast::JSXMemberExpressionObject::MemberExpression(member_expr) => {
-            let object_name = extract_jsx_member_object_name(&member_expr.object)?;
-            let property_name = &member_expr.property.name;
-            Some(format!("{}.{}", object_name, property_name))
-        }
-        oxc_ast::ast::JSXMemberExpressionObject::ThisExpression(_) => None,
-    }
-}
-
-/// Analyze imported components to see if they call isComponentPresent()
-fn analyze_imported_components(
-    import_symbols: &Vec<ImportSymbol>,
+/// Find isComponentPresent calls in an imported component
+fn find_is_component_present_calls_in_imported_component(
+    semantic: &Semantic,
+    jsx_component: &str,
     current_file: &Path,
-) -> Result<Vec<ComponentWithCheck>> {
-    let mut component_checks = Vec::new();
-
-    println!("🔍 Analyzing imported components for isComponentPresent() calls...");
-
-    for symbol in import_symbols {
-        // Skip non-relative imports for now (e.g., '@builder.io/qwik')
-        if !symbol.module_source.starts_with('.') {
-            continue;
-        }
-
-        // Resolve the import path
-        match resolve_import_path(&symbol.module_source, current_file) {
-            Ok(resolved_path) => {
-                println!("📂 Analyzing component file: {}", resolved_path);
-
-                // Analyze the component file for isComponentPresent() calls
-                if let Ok(checks) = find_component_checks_in_file(&resolved_path) {
-                    for check in checks {
-                        // Map the component check to the local name used in current file
-                        let component_name =
-                            format!("{}.{}", symbol.local_name, check.component_name);
-                        let checks_for = check.checks_for.clone();
-
-                        component_checks.push(ComponentWithCheck {
-                            component_name: component_name.clone(),
-                            checks_for: checks_for.clone(),
-                        });
-
-                        println!(
-                            "✅ Component '{}' checks for '{}'",
-                            component_name, checks_for
-                        );
+) -> Result<Vec<ComponentPresenceCall>> {
+    println!("🔍 Analyzing imported component: {}", jsx_component);
+    
+    // Handle member expressions like DummyComp.Root
+    if jsx_component.contains('.') {
+        let parts: Vec<&str> = jsx_component.split('.').collect();
+        if parts.len() == 2 {
+            let module_name = parts[0];
+            let component_name = parts[1];
+            
+            // Find import for the module
+            let import_source = find_import_source_for_component(semantic, module_name);
+            if let Some(source) = import_source {
+                if source.starts_with('.') {
+                    // Resolve the module directory
+                    if let Ok(module_dir) = resolve_import_with_oxc(&source, current_file) {
+                        println!("📂 Resolved module {} to: {}", module_name, module_dir);
+                        
+                        // Look for component file in the module directory
+                        let component_file = find_component_file_in_module(&module_dir, component_name)?;
+                        println!("📂 Found component file: {}", component_file);
+                        
+                        // Analyze the component file for isComponentPresent calls
+                        return analyze_file_for_is_component_present_calls(&component_file);
                     }
                 }
             }
-            Err(e) => {
-                println!(
-                    "⚠️ Could not resolve import '{}': {}",
-                    symbol.module_source, e
-                );
+        }
+    } else {
+        // Handle single component names
+        let import_source = find_import_source_for_component(semantic, jsx_component);
+        if let Some(source) = import_source {
+            if source.starts_with('.') {
+                if let Ok(resolved_path) = resolve_import_with_oxc(&source, current_file) {
+                    println!("📂 Resolved component {} to: {}", jsx_component, resolved_path);
+                    return analyze_file_for_is_component_present_calls(&resolved_path);
+                }
             }
         }
     }
-
-    Ok(component_checks)
+    
+    Ok(Vec::new())
 }
 
-/// Find isComponentPresent() calls in a specific file
-fn find_component_checks_in_file(file_path: &str) -> Result<Vec<ComponentWithCheck>> {
+/// Find component file in a module directory (e.g., root.tsx in dummy-comp/)
+fn find_component_file_in_module(module_dir: &str, component_name: &str) -> Result<String> {
+    let module_path = Path::new(module_dir);
+    
+    // If module_dir points to an index file, get the parent directory
+    let actual_module_dir = if module_dir.ends_with("index.ts") || module_dir.ends_with("index.tsx") || 
+                               module_dir.ends_with("index.js") || module_dir.ends_with("index.jsx") {
+        module_path.parent().ok_or("Could not get module parent directory")?
+    } else {
+        module_path
+    };
+    
+    let component_file_name = component_name.to_lowercase();
+    
+    // Try different extensions and naming patterns
+    for ext in &[".tsx", ".ts", ".jsx", ".js"] {
+        let component_file = actual_module_dir.join(format!("{}{}", component_file_name, ext));
+        if component_file.exists() {
+            println!("📂 Found component file: {}", component_file.display());
+            return Ok(component_file.to_string_lossy().to_string());
+        }
+    }
+    
+    Err(format!("Could not find component file for {} in {}", component_name, actual_module_dir.display()).into())
+}
+
+/// Analyze a file for isComponentPresent() calls
+fn analyze_file_for_is_component_present_calls(file_path: &str) -> Result<Vec<ComponentPresenceCall>> {
     let source_text = fs::read_to_string(file_path)?;
     let allocator = Allocator::default();
-    let source_type = oxc_span::SourceType::from_path(Path::new(file_path)).unwrap_or_default();
+    let source_type = SourceType::from_path(Path::new(file_path)).unwrap_or_default();
 
-    // Parse the file
     let oxc_parser::ParserReturn {
         program, errors, ..
     } = oxc_parser::Parser::new(&allocator, &source_text, source_type).parse();
@@ -273,54 +236,26 @@ fn find_component_checks_in_file(file_path: &str) -> Result<Vec<ComponentWithChe
         return Ok(Vec::new());
     }
 
-    // Build semantic information
     let semantic_ret = oxc_semantic::SemanticBuilder::new().build(&program);
     let semantic = semantic_ret.semantic;
 
-    let mut checks = Vec::new();
+    let mut calls = Vec::new();
 
-    // First, try to find isComponentPresent calls directly in this file
     for node in semantic.nodes().iter() {
         if let AstKind::CallExpression(call_expr) = node.kind() {
             if let Some(function_name) = extract_function_name(call_expr) {
                 if function_name == "isComponentPresent" {
-                    if let Some(component_name) = extract_component_argument(call_expr) {
-                        checks.push(ComponentWithCheck {
-                            component_name: "Root".to_string(), // Assume it's in Root for now
-                            checks_for: component_name,
-                        });
-                    }
-                }
-            }
-        }
-    }
-
-    // If no direct calls found, check if this is an index file that exports other components
-    if checks.is_empty() {
-        println!("🔍 No direct isComponentPresent calls found, checking exports...");
-
-        // Look for imports and exports that might point to actual component files
-        for node in semantic.nodes().iter() {
-            if let AstKind::ImportDeclaration(import_decl) = node.kind() {
-                let import_source = import_decl.source.value.to_string();
-
-                // Check if this import might be for a component that calls isComponentPresent
-                if import_source.starts_with('.')
-                    && (import_source.contains("root") || import_source.contains("Root"))
-                {
-                    println!(
-                        "📂 Found potential Root component import: {}",
-                        import_source
-                    );
-
-                    // Resolve and analyze the Root component file
-                    if let Ok(resolved_path) =
-                        resolve_import_path(&import_source, Path::new(file_path))
-                    {
-                        println!("📂 Analyzing Root component file: {}", resolved_path);
-
-                        if let Ok(root_checks) = find_component_checks_in_file(&resolved_path) {
-                            checks.extend(root_checks);
+                    if let Some(first_arg) = call_expr.arguments.first() {
+                        if let Some(component_name) = extract_component_name_from_argument(first_arg) {
+                            println!("🔍 Found isComponentPresent({}) call in {}", component_name, file_path);
+                            
+                            calls.push(ComponentPresenceCall {
+                                component_name,
+                                call_span_start: call_expr.span.start,
+                                call_span_end: call_expr.span.end,
+                                is_present_in_subtree: false, // Will be set later
+                                source_file: file_path.to_string(),
+                            });
                         }
                     }
                 }
@@ -328,7 +263,260 @@ fn find_component_checks_in_file(file_path: &str) -> Result<Vec<ComponentWithChe
         }
     }
 
-    Ok(checks)
+    Ok(calls)
+}
+
+/// Check if a component is present in the JSX subtree
+fn is_component_present_in_jsx_subtree(
+    semantic: &Semantic,
+    component_name: &str,
+    current_file: &Path,
+) -> Result<bool> {
+    println!("🔍 Checking if {} is present in JSX subtree", component_name);
+    
+    // Step 1: Look for direct JSX usage of the component
+    for node in semantic.nodes().iter() {
+        if let AstKind::JSXOpeningElement(jsx_opening) = node.kind() {
+            if let Some(element_name) = extract_jsx_element_name(jsx_opening) {
+                // Check for direct usage like <Description />
+                if element_name == component_name {
+                    println!("✅ Found direct usage of {} in JSX", component_name);
+                    return Ok(true);
+                }
+                
+                // Check for member expression usage like <SomeModule.Description />
+                if element_name.ends_with(&format!(".{}", component_name)) {
+                    println!("✅ Found member expression usage of {} in JSX: {}", component_name, element_name);
+                    return Ok(true);
+                }
+            }
+        }
+    }
+
+    // Step 2: Look for imported components that might contain the target component
+    println!("🔍 Checking imported components for {} usage...", component_name);
+    
+    let jsx_components = extract_imported_jsx_components(semantic);
+    
+    for jsx_component in jsx_components {
+        // Skip the component we're checking for to avoid infinite recursion
+        if jsx_component.ends_with(&format!(".{}", component_name)) {
+            continue;
+        }
+        
+        if let Ok(contains_target) = analyze_imported_component_for_target(
+            semantic, 
+            &jsx_component, 
+            component_name, 
+            current_file
+        ) {
+            if contains_target {
+                println!("✅ Found {} in imported component {}", component_name, jsx_component);
+                return Ok(true);
+            }
+        }
+    }
+
+    println!("❌ Component {} not found in JSX subtree", component_name);
+    Ok(false)
+}
+
+/// Check if a name is a standard HTML element
+fn is_html_element(name: &str) -> bool {
+    matches!(name.to_lowercase().as_str(), 
+        "div" | "span" | "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | 
+        "a" | "img" | "input" | "button" | "form" | "ul" | "ol" | "li" |
+        "table" | "tr" | "td" | "th" | "thead" | "tbody" | "nav" | "header" |
+        "footer" | "main" | "section" | "article" | "aside" | "details" |
+        "summary" | "dialog" | "canvas" | "svg" | "video" | "audio"
+    )
+}
+
+/// Analyze an imported component to see if it contains the target component
+fn analyze_imported_component_for_target(
+    semantic: &Semantic,
+    jsx_component: &str,
+    target_component: &str,
+    current_file: &Path,
+) -> Result<bool> {
+    // Find the import for this JSX component
+    let import_source = find_import_source_for_component(semantic, jsx_component);
+    
+    if let Some(source) = import_source {
+        if source.starts_with('.') {
+            // Resolve relative import
+            if let Ok(resolved_path) = resolve_import_with_oxc(&source, current_file) {
+                println!("📂 Analyzing {} (from {}) for {}", jsx_component, resolved_path, target_component);
+                
+                // Analyze the resolved file
+                return analyze_file_for_component_usage(&resolved_path, target_component);
+            }
+        }
+    }
+    
+    Ok(false)
+}
+
+/// Find the import source for a given component name
+fn find_import_source_for_component(semantic: &Semantic, component_name: &str) -> Option<String> {
+    for node in semantic.nodes().iter() {
+        if let AstKind::ImportDeclaration(import_decl) = node.kind() {
+            let module_source = import_decl.source.value.to_string();
+            
+            if let Some(specifiers) = &import_decl.specifiers {
+                for spec in specifiers {
+                    let local_name = match spec {
+                        oxc_ast::ast::ImportDeclarationSpecifier::ImportSpecifier(spec) => {
+                            spec.local.name.to_string()
+                        }
+                        oxc_ast::ast::ImportDeclarationSpecifier::ImportDefaultSpecifier(spec) => {
+                            spec.local.name.to_string()
+                        }
+                        oxc_ast::ast::ImportDeclarationSpecifier::ImportNamespaceSpecifier(spec) => {
+                            spec.local.name.to_string()
+                        }
+                    };
+                    
+                    if local_name == component_name {
+                        return Some(module_source);
+                    }
+                }
+            }
+        }
+    }
+    
+    None
+}
+
+/// Analyze a file to see if it contains usage of the target component
+fn analyze_file_for_component_usage(file_path: &str, target_component: &str) -> Result<bool> {
+    let source_text = fs::read_to_string(file_path)?;
+    let allocator = Allocator::default();
+    let source_type = SourceType::from_path(Path::new(file_path)).unwrap_or_default();
+
+    let oxc_parser::ParserReturn {
+        program, errors, ..
+    } = oxc_parser::Parser::new(&allocator, &source_text, source_type).parse();
+
+    if !errors.is_empty() {
+        return Ok(false);
+    }
+
+    let semantic_ret = oxc_semantic::SemanticBuilder::new().build(&program);
+    let semantic = semantic_ret.semantic;
+
+    // Check for target component usage
+    for node in semantic.nodes().iter() {
+        if let AstKind::JSXOpeningElement(jsx_opening) = node.kind() {
+            if let Some(element_name) = extract_jsx_element_name(jsx_opening) {
+                if element_name == target_component || 
+                   element_name.ends_with(&format!(".{}", target_component)) {
+                    println!("✅ Found {} in {}", target_component, file_path);
+                    return Ok(true);
+                }
+            }
+        }
+    }
+
+    Ok(false)
+}
+
+/// Use OXC resolver for proper module resolution
+fn resolve_import_with_oxc(import_source: &str, current_file: &Path) -> Result<String> {
+    let options = ResolveOptions {
+        extensions: vec![".tsx".into(), ".ts".into(), ".jsx".into(), ".js".into()],
+        ..Default::default()
+    };
+
+    let resolver = Resolver::new(options);
+    let current_dir = current_file
+        .parent()
+        .ok_or("Could not get parent directory")?;
+
+    match resolver.resolve(current_dir, import_source) {
+        Ok(resolution) => {
+            let resolved_path = resolution.full_path();
+            Ok(resolved_path.to_string_lossy().to_string())
+        }
+        Err(e) => {
+            println!("❌ OXC resolution failed for '{}': {:?}", import_source, e);
+            Err(format!("Could not resolve import '{}': {:?}", import_source, e).into())
+        }
+    }
+}
+
+/// Generate transformations for the current file to pass props to components
+fn generate_transformations_for_current_file(
+    semantic: &Semantic,
+    component_calls: &Vec<ComponentPresenceCall>,
+    _file_path: &Path,
+) -> Result<Vec<Transformation>> {
+    let mut transformations = Vec::new();
+    
+    // Only add props to JSX components that have isComponentPresent calls
+    for call in component_calls {
+        if call.is_present_in_subtree {
+            let current_file_transformations = generate_jsx_prop_transformations(semantic, &call)?;
+            transformations.extend(current_file_transformations);
+        }
+    }
+
+    Ok(transformations)
+}
+
+/// Generate transformations to add props to JSX components
+fn generate_jsx_prop_transformations(
+    semantic: &Semantic,
+    call: &ComponentPresenceCall,
+) -> Result<Vec<Transformation>> {
+    let mut transformations = Vec::new();
+    
+    // Find the JSX component that corresponds to the source file where the isComponentPresent call was found
+    let source_file_name = Path::new(&call.source_file).file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    
+    println!("🔍 Looking for JSX component corresponding to source file: {} ({})", call.source_file, source_file_name);
+    
+    // Look for JSX components that match the source file
+    for node in semantic.nodes().iter() {
+        if let AstKind::JSXOpeningElement(jsx_opening) = node.kind() {
+            if let Some(element_name) = extract_jsx_element_name(jsx_opening) {
+                // Check if this JSX element corresponds to the component containing the isComponentPresent call
+                let should_add_prop = if element_name.contains('.') {
+                    // For member expressions like DummyComp.Root
+                    let parts: Vec<&str> = element_name.split('.').collect();
+                    if parts.len() == 2 {
+                        let component_name = parts[1].to_lowercase();
+                        component_name == source_file_name
+                    } else {
+                        false
+                    }
+                } else {
+                    // For direct components
+                    element_name.to_lowercase() == source_file_name
+                };
+                
+                if should_add_prop {
+                    println!("🔧 Adding prop to JSX component: {}", element_name);
+                    let prop_name = format!("__qwik_analyzer_has_{}", call.component_name);
+                    let prop_value = call.is_present_in_subtree;
+                    let new_prop = format!(" {}={{{}}}", prop_name, prop_value);
+                    
+                    // Find the position to insert the prop (before the closing >)
+                    let insert_pos = jsx_opening.span.end - 1; // Just before the >
+                    
+                    transformations.push(Transformation {
+                        start: insert_pos,
+                        end: insert_pos,
+                        replacement: new_prop,
+                    });
+                }
+            }
+        }
+    }
+    
+    Ok(transformations)
 }
 
 /// Extract function name from call expression
@@ -339,414 +527,7 @@ fn extract_function_name(call_expr: &CallExpression) -> Option<String> {
     }
 }
 
-/// Extract component argument from isComponentPresent() call
-fn extract_component_argument(call_expr: &CallExpression) -> Option<String> {
-    if let Some(first_arg) = call_expr.arguments.first() {
-        match &first_arg {
-            oxc_ast::ast::Argument::Identifier(identifier) => Some(identifier.name.to_string()),
-            _ => None,
-        }
-    } else {
-        None
-    }
-}
-
-/// Check if requested components are present with recursive subtree analysis
-fn check_component_presence_with_recursive_analysis(
-    jsx_elements: &[String],
-    component_checks: &[ComponentWithCheck],
-    current_file: &Path,
-) -> Result<bool> {
-    if component_checks.is_empty() {
-        println!("❌ No imported components with isComponentPresent() calls found");
-        return Ok(false);
-    }
-
-    println!("🔍 Checking component presence with recursive analysis...");
-
-    for check in component_checks {
-        println!(
-            "🎯 Component '{}' checks for '{}'",
-            check.component_name, check.checks_for
-        );
-
-        // Check if the component that makes the check is used in JSX
-        let component_used = jsx_elements
-            .iter()
-            .any(|element| element.contains(&check.component_name));
-
-        if component_used {
-            println!("✅ Found component '{}' being used", check.component_name);
-
-            // First check if target component is directly in current JSX tree
-            let direct_found = jsx_elements.iter().any(|element| {
-                element.contains(&check.checks_for)
-                    || element.contains(&format!(".{}", check.checks_for))
-            });
-
-            if direct_found {
-                println!(
-                    "✅ Found target component '{}' directly in JSX tree!",
-                    check.checks_for
-                );
-                return Ok(true);
-            }
-
-            // If not found directly, recursively check imported components within the Root subtree
-            println!("🔍 Recursively analyzing components within Root subtree...");
-
-            if recursively_check_jsx_subtree(jsx_elements, &check.checks_for, current_file)? {
-                println!(
-                    "✅ Found target component '{}' in recursive JSX analysis!",
-                    check.checks_for
-                );
-                return Ok(true);
-            }
-
-            println!(
-                "❌ Target component '{}' not found in JSX tree or subtrees",
-                check.checks_for
-            );
-        } else {
-            println!(
-                "❌ Component '{}' not used in this JSX tree",
-                check.component_name
-            );
-        }
-    }
-
-    Ok(false)
-}
-
-/// Recursively analyze JSX subtree by following component imports
-fn recursively_check_jsx_subtree(
-    jsx_elements: &[String],
-    target_component: &str,
-    current_file: &Path,
-) -> Result<bool> {
-    // Extract component names that are not part of the target module (like "Heyo")
-    for element in jsx_elements {
-        // Skip elements that contain dots (they're likely from the target module)
-        if element.contains('.') {
-            continue;
-        }
-
-        // Skip basic HTML elements
-        if element.starts_with(char::is_lowercase) {
-            continue;
-        }
-
-        println!("🔍 Recursively analyzing component: {}", element);
-
-        // Try to find and analyze this component file
-        if let Ok(component_file) = find_component_file(element, current_file) {
-            println!("📂 Found component file: {}", component_file);
-
-            // Analyze the component file recursively
-            if let Ok(has_target) = analyze_component_for_target(&component_file, target_component)
-            {
-                if has_target {
-                    return Ok(true);
-                }
-            }
-        }
-    }
-
-    Ok(false)
-}
-
-/// Find the file for a given component name
-fn find_component_file(component_name: &str, current_file: &Path) -> Result<String> {
-    let current_dir = current_file
-        .parent()
-        .ok_or("Could not get parent directory")?;
-    let component_file_name = component_name.to_lowercase();
-
-    // Try common component file patterns
-    for pattern in &[
-        format!("./{}.tsx", component_file_name),
-        format!("./{}.ts", component_file_name),
-        format!("./{}.jsx", component_file_name),
-        format!("./{}.js", component_file_name),
-    ] {
-        let resolved_path = current_dir.join(pattern);
-        if resolved_path.exists() {
-            return Ok(resolved_path.to_string_lossy().to_string());
-        }
-    }
-
-    Err(format!("Could not find component file for: {}", component_name).into())
-}
-
-/// Analyze a component file to see if it contains the target component
-fn analyze_component_for_target(file_path: &str, target_component: &str) -> Result<bool> {
-    let source_text = fs::read_to_string(file_path)?;
-    let allocator = Allocator::default();
-    let source_type = oxc_span::SourceType::from_path(Path::new(file_path)).unwrap_or_default();
-
-    // Parse the file
-    let oxc_parser::ParserReturn {
-        program, errors, ..
-    } = oxc_parser::Parser::new(&allocator, &source_text, source_type).parse();
-
-    if !errors.is_empty() {
-        return Ok(false);
-    }
-
-    // Build semantic information
-    let semantic_ret = oxc_semantic::SemanticBuilder::new().build(&program);
-    let semantic = semantic_ret.semantic;
-
-    // Build import symbol table (no filtering for recursive analysis)
-    let import_symbols = build_import_symbol_table(&semantic);
-
-    // Extract JSX elements and check for target
-    let jsx_elements = extract_jsx_elements(&semantic);
-
-    for element in jsx_elements {
-        if element.contains(target_component) || element.contains(&format!(".{}", target_component))
-        {
-            println!(
-                "✅ Found target '{}' in component file: {}",
-                target_component, file_path
-            );
-            return Ok(true);
-        }
-    }
-
-    Ok(false)
-}
-
-/// Resolve import path relative to importer
-fn resolve_import_path(import_source: &str, importer: &Path) -> Result<String> {
-    let importer_dir = importer.parent().ok_or("Could not get parent directory")?;
-
-    let resolved = if import_source.starts_with('.') {
-        // Relative import
-        importer_dir.join(import_source)
-    } else {
-        // Absolute or node_modules import
-        return Err("Non-relative imports not supported".into());
-    };
-
-    // Try different extensions
-    for ext in &[".tsx", ".ts", ".jsx", ".js"] {
-        let with_ext = resolved.with_extension(&ext[1..]);
-        if with_ext.exists() {
-            return Ok(with_ext.to_string_lossy().to_string());
-        }
-
-        // Also try with index file
-        let index_path = resolved.join(format!("index{}", ext));
-        if index_path.exists() {
-            return Ok(index_path.to_string_lossy().to_string());
-        }
-    }
-
-    // If not found, return error
-    Err(format!("Could not resolve import: {}", import_source).into())
-}
-
-/// Find isComponentPresent() calls in component definitions and prepare prop-based transformations
-fn find_and_prepare_component_transformations(semantic: &Semantic) -> Vec<Transformation> {
-    let mut transformations = Vec::new();
-    let source_text = semantic.source_text();
-
-    for node in semantic.nodes().iter() {
-        if let AstKind::CallExpression(call_expr) = node.kind() {
-            if let Some(function_name) = extract_function_name(call_expr) {
-                if function_name == "isComponentPresent" {
-                    if !call_expr.arguments.is_empty() {
-                        let call_span = call_expr.span;
-                        let start = call_span.start as u32;
-                        let end = call_span.end as u32;
-
-                        // Extract the component argument
-                        if let Some(component_arg) = call_expr.arguments.first() {
-                            if let Some(component_name) =
-                                extract_component_name_from_argument(component_arg)
-                            {
-                                // Check if we need to add props parameter to the component function
-                                if let Some(props_transformation) =
-                                    check_and_add_props_parameter(semantic, call_span.start)
-                                {
-                                    transformations.push(props_transformation);
-                                }
-
-                                // Transform: isComponentPresent(Description)
-                                // ->        isComponentPresent(Description, props.__qwik_analyzer_has_Description)
-                                let prop_name = format!("__qwik_analyzer_has_{}", component_name);
-                                let replacement = format!(
-                                    "isComponentPresent({}, props.{})",
-                                    component_name, prop_name
-                                );
-
-                                transformations.push(Transformation {
-                                    start,
-                                    end,
-                                    replacement: replacement.clone(),
-                                });
-
-                                println!("🔄 Preparing component transformation: {}..{} -> {} (call: isComponentPresent)", start, end, replacement);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    transformations
-}
-
-/// Check if component function needs props parameter and add it if missing
-fn check_and_add_props_parameter(
-    semantic: &Semantic,
-    call_position: u32,
-) -> Option<Transformation> {
-    // Find the component$ function that contains this call
-    for node in semantic.nodes().iter() {
-        if let AstKind::CallExpression(call_expr) = node.kind() {
-            // Check if this is a component$ call
-            if let Some(function_name) = extract_function_name(call_expr) {
-                if function_name == "component$" {
-                    // Check if this call contains our isComponentPresent call
-                    let call_start = call_expr.span.start;
-                    let call_end = call_expr.span.end;
-
-                    if call_position >= call_start && call_position <= call_end {
-                        // Found the component$ call that contains our isComponentPresent
-                        // Check if it has a props parameter
-                        return check_component_arrow_function_params(call_expr);
-                    }
-                }
-            }
-        }
-    }
-
-    None
-}
-
-/// Check component$() arrow function parameters and add props if missing
-fn check_component_arrow_function_params(call_expr: &CallExpression) -> Option<Transformation> {
-    if let Some(first_arg) = call_expr.arguments.first() {
-        if let oxc_ast::ast::Argument::ArrowFunctionExpression(arrow_fn) = first_arg {
-            // Check if the function already has parameters
-            if arrow_fn.params.items.is_empty() && arrow_fn.params.rest.is_none() {
-                // No parameters - we need to add props
-                let params_span = arrow_fn.params.span;
-                let start = params_span.start as u32;
-                let end = params_span.end as u32;
-
-                // Transform () => { ... } to (props) => { ... }
-                let replacement = "(props)".to_string();
-
-                println!(
-                    "🔄 Adding props parameter: {}..{} -> {}",
-                    start, end, replacement
-                );
-
-                return Some(Transformation {
-                    start,
-                    end,
-                    replacement,
-                });
-            } else {
-                // Function already has parameters - check if one is named 'props'
-                let has_props = arrow_fn.params.items.iter().any(|param| {
-                    if let oxc_ast::ast::BindingPatternKind::BindingIdentifier(ident) =
-                        &param.pattern.kind
-                    {
-                        ident.name.as_str() == "props"
-                    } else {
-                        false
-                    }
-                });
-
-                if !has_props {
-                    // Has parameters but no 'props' - we need to add props as first parameter
-                    let params_start = arrow_fn.params.span.start as u32;
-
-                    // Insert props as first parameter
-                    let insertion_point = params_start + 1; // After the opening (
-                    let replacement = "props, ".to_string();
-
-                    println!(
-                        "🔄 Adding props as first parameter at position {}",
-                        insertion_point
-                    );
-
-                    return Some(Transformation {
-                        start: insertion_point,
-                        end: insertion_point,
-                        replacement,
-                    });
-                }
-            }
-        }
-    }
-
-    None
-}
-
-/// Analyze Root component usage and generate consumer-side prop injections
-fn analyze_root_component_usage(
-    semantic: &Semantic,
-    import_symbols: &Vec<ImportSymbol>,
-) -> (bool, Vec<Transformation>) {
-    let mut transformations = Vec::new();
-    let mut overall_has_description = false;
-
-    // Find JSX elements that are Root components
-    for node in semantic.nodes().iter() {
-        if let AstKind::JSXOpeningElement(jsx_opening) = node.kind() {
-            if let Some(element_name) = extract_jsx_element_name_from_opening(jsx_opening) {
-                // Check if this is a Root component (e.g., "DummyComp.Root")
-                if element_name.ends_with(".Root") {
-                    println!("🎯 Found Root component usage: {}", element_name);
-
-                    // Analyze the subtree of this Root component for target components
-                    let has_description_in_subtree =
-                        analyze_subtree_for_target_components(semantic, node);
-
-                    if has_description_in_subtree {
-                        overall_has_description = true;
-
-                        // Generate prop injection transformation
-                        let jsx_span = jsx_opening.span;
-                        let start = jsx_span.start as u32;
-                        let end = jsx_span.end as u32;
-
-                        // Find insertion point for the prop (before closing >)
-                        let source_text = semantic.source_text();
-                        let jsx_text = &source_text[start as usize..end as usize];
-
-                        // Insert the prop before the closing >
-                        if let Some(closing_pos) = jsx_text.rfind('>') {
-                            let insertion_point = start + closing_pos as u32;
-                            let prop_injection = " __qwik_analyzer_has_Description={true}";
-
-                            transformations.push(Transformation {
-                                start: insertion_point,
-                                end: insertion_point,
-                                replacement: prop_injection.to_string(),
-                            });
-
-                            println!(
-                                "🔄 Preparing consumer transformation: inject prop at position {}",
-                                insertion_point
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    (overall_has_description, transformations)
-}
-
-/// Extract component name from a function call argument
+/// Extract component name from function argument
 fn extract_component_name_from_argument(argument: &oxc_ast::ast::Argument) -> Option<String> {
     match argument {
         oxc_ast::ast::Argument::Identifier(identifier) => Some(identifier.name.to_string()),
@@ -755,16 +536,14 @@ fn extract_component_name_from_argument(argument: &oxc_ast::ast::Argument) -> Op
 }
 
 /// Extract JSX element name from opening element
-fn extract_jsx_element_name_from_opening(
-    jsx_opening: &oxc_ast::ast::JSXOpeningElement,
-) -> Option<String> {
+fn extract_jsx_element_name(jsx_opening: &JSXOpeningElement) -> Option<String> {
     match &jsx_opening.name {
         oxc_ast::ast::JSXElementName::Identifier(identifier) => Some(identifier.name.to_string()),
         oxc_ast::ast::JSXElementName::IdentifierReference(identifier) => {
             Some(identifier.name.to_string())
         }
         oxc_ast::ast::JSXElementName::MemberExpression(member_expr) => {
-            // Handle member expressions like DummyComp.Description
+            // Handle member expressions like SomeModule.Component
             let object_name = extract_jsx_member_object_name(&member_expr.object)?;
             let property_name = &member_expr.property.name;
             Some(format!("{}.{}", object_name, property_name))
@@ -773,29 +552,108 @@ fn extract_jsx_element_name_from_opening(
     }
 }
 
-/// Analyze the subtree of a Root component for target components like Description
-fn analyze_subtree_for_target_components(
-    semantic: &Semantic,
-    root_node: &oxc_semantic::AstNode,
-) -> bool {
-    // This is a simplified version - in practice, you'd want to traverse the JSX tree
-    // and look for Description components within this Root's children
+/// Extract object name from JSX member expression
+fn extract_jsx_member_object_name(
+    object: &oxc_ast::ast::JSXMemberExpressionObject,
+) -> Option<String> {
+    match object {
+        oxc_ast::ast::JSXMemberExpressionObject::IdentifierReference(identifier) => {
+            Some(identifier.name.to_string())
+        }
+        oxc_ast::ast::JSXMemberExpressionObject::MemberExpression(member_expr) => {
+            let object_name = extract_jsx_member_object_name(&member_expr.object)?;
+            let property_name = &member_expr.property.name;
+            Some(format!("{}.{}", object_name, property_name))
+        }
+        _ => None,
+    }
+}
 
-    // For now, let's look for any Description usage in the entire file
-    // In a more sophisticated implementation, we'd traverse only the children of this specific Root
+/// Generate transformations for the current file if it contains isComponentPresent calls
+fn generate_transformations_for_current_file_components(
+    semantic: &Semantic,
+    file_path: &Path,
+) -> Result<Vec<Transformation>> {
+    let mut transformations = Vec::new();
+    
+    // Check if the current file contains any isComponentPresent calls
+    let mut has_is_component_present_calls = false;
     for node in semantic.nodes().iter() {
-        if let AstKind::JSXOpeningElement(jsx_opening) = node.kind() {
-            if let Some(element_name) = extract_jsx_element_name_from_opening(jsx_opening) {
-                if element_name.contains("Description") {
-                    println!(
-                        "✅ Found Description component in subtree: {}",
-                        element_name
-                    );
-                    return true;
+        if let AstKind::CallExpression(call_expr) = node.kind() {
+            if let Some(function_name) = extract_function_name(call_expr) {
+                if function_name == "isComponentPresent" {
+                    has_is_component_present_calls = true;
+                    break;
                 }
             }
         }
     }
+    
+    // If this file contains isComponentPresent calls, add transformations
+    if has_is_component_present_calls {
+        let source_text = std::fs::read_to_string(file_path)?;
+        
+        // Step 1: Check if component$ function already has props parameter
+        let mut component_has_props = false;
+        let mut component_span: Option<(u32, u32)> = None;
 
-    false
+        for node in semantic.nodes().iter() {
+            if let AstKind::CallExpression(call_expr) = node.kind() {
+                if let Some(function_name) = extract_function_name(call_expr) {
+                    if function_name == "component$" {
+                        if let Some(first_arg) = call_expr.arguments.first() {
+                            if let oxc_ast::ast::Argument::ArrowFunctionExpression(arrow_fn) = first_arg {
+                                component_span = Some((arrow_fn.span.start, arrow_fn.span.end));
+                                component_has_props = !arrow_fn.params.items.is_empty();
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Step 2: Add props parameter if missing
+        if let Some((component_start, _)) = component_span {
+            if !component_has_props {
+                // Find the opening parenthesis after the arrow function start
+                let component_text = &source_text[component_start as usize..];
+                if let Some(paren_pos) = component_text.find('(') {
+                    let insert_pos = component_start + paren_pos as u32 + 1;
+                    transformations.push(Transformation {
+                        start: insert_pos,
+                        end: insert_pos,
+                        replacement: "props: any".to_string(),
+                    });
+                    println!("🔧 Adding props parameter at position {} in {}", insert_pos, file_path.display());
+                }
+            }
+        }
+
+        // Step 3: Transform isComponentPresent calls  
+        for node in semantic.nodes().iter() {
+            if let AstKind::CallExpression(call_expr) = node.kind() {
+                if let Some(function_name) = extract_function_name(call_expr) {
+                    if function_name == "isComponentPresent" {
+                        if let Some(first_arg) = call_expr.arguments.first() {
+                            if let Some(component_name) = extract_component_name_from_argument(first_arg) {
+                                // Transform isComponentPresent(Description) to isComponentPresent(Description, props.__qwik_analyzer_has_Description)
+                                let prop_name = format!("__qwik_analyzer_has_{}", component_name);
+                                let new_call = format!("isComponentPresent({}, props.{})", component_name, prop_name);
+                                
+                                transformations.push(Transformation {
+                                    start: call_expr.span.start,
+                                    end: call_expr.span.end,
+                                    replacement: new_call,
+                                });
+                                println!("🔧 Transforming isComponentPresent({}) call in {}", component_name, file_path.display());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    Ok(transformations)
 }
