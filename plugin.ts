@@ -1,5 +1,4 @@
 import type { PluginOption } from "vite";
-import { analyzeFileChanged } from "./index.js";
 
 interface QwikAnalyzerOptions {
   debug?: boolean;
@@ -31,8 +30,10 @@ export function qwikAnalyzer(options: QwikAnalyzerOptions = {}): PluginOption {
         debug(`File ${change.event}: ${cleanedId}`);
         
         try {
-          // Rust analyzes the file - no caching, no complexity
-          await analyzeFileChanged(cleanedId, change.event);
+          // Import from parent directory since plugin.js is in dist/
+          const analyzerPath = new URL("../index.js", import.meta.url).pathname;
+          const { analyzeFileChanged } = await import(analyzerPath);
+          analyzeFileChanged(cleanedId, change.event);
         } catch (error) {
           console.error(`[qwik-analyzer] Error processing change for ${cleanedId}:`, error);
         }

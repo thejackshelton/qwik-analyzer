@@ -6,7 +6,7 @@ import { defineConfig, type UserConfig } from "vite";
 import { qwikVite } from "@builder.io/qwik/optimizer";
 import { qwikCity } from "@builder.io/qwik-city/vite";
 import tsconfigPaths from "vite-tsconfig-paths";
-import { qwikAnalyzer } from "../plugin.js";
+import { qwikAnalyzer } from "../dist/plugin.js";
 import pkg from "./package.json";
 
 type PkgDep = Record<string, string>;
@@ -33,7 +33,7 @@ export default defineConfig(({ command, mode }): UserConfig => {
     optimizeDeps: {
       // Put problematic deps that break bundling here, mostly those with binaries.
       // For example ['better-sqlite3'] if you use that in server functions.
-      exclude: [],
+      exclude: ["../index.js", "qwik-analyzer"],
     },
 
     /**
