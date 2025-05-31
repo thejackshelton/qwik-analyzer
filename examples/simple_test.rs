@@ -1,59 +1,39 @@
+// Use the correct crate name as defined in Cargo.toml
+extern crate qwik_analyzer;
+
 use qwik_analyzer::QwikAnalyzer;
 use std::path::Path;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("🔍 Testing Qwik Analyzer with Real Qwik Project");
+fn main() {
+    println!("🚀 Testing qwik-analyzer...");
 
-    let analyzer = QwikAnalyzer::new(true);
+    let analyzer = QwikAnalyzer::new(true); // Enable debug mode
 
-    // Test files from the real Qwik project
+    // Test files that should contain Checkbox.Description within Checkbox.Root
     let test_files = [
-        ("Direct Example", "qwik-app/src/examples/direct_example.tsx"),
-        (
-            "Indirect Example",
-            "qwik-app/src/examples/indirect_example.tsx",
-        ),
-        ("Heyo Component", "qwik-app/src/examples/heyo.tsx"),
+        "examples/test_files/direct_example.tsx",
+        "examples/test_files/indirect_example.tsx",
     ];
 
-    for (name, file_path) in test_files {
-        println!("\n📁 Analyzing: {}", name);
-        println!("   Path: {}", file_path);
-
+    for file_path in &test_files {
         let path = Path::new(file_path);
+        println!("\n📂 Analyzing: {}", path.display());
+
+        if !path.exists() {
+            println!("❌ File does not exist: {}", file_path);
+            continue;
+        }
+
         match analyzer.analyze_file(path) {
             Ok(result) => {
-                println!("   ✅ Analysis complete");
-                println!("   📊 Results:");
-                println!("      - Has description: {}", result.has_description);
-                println!("      - Found directly: {}", result.found_directly);
-                println!(
-                    "      - Candidate components: {}",
-                    result.candidate_components.len()
-                );
-
-                for (i, candidate) in result.candidate_components.iter().enumerate() {
-                    println!(
-                        "        {}. {} (import: {:?}, provides: {})",
-                        i + 1,
-                        candidate.component_name,
-                        candidate.import_source,
-                        candidate.provides_description
-                    );
-                }
-
-                if result.has_description {
-                    println!("   🎯 This file should get _staticHasDescription=true");
-                } else {
-                    println!("   📝 This file should get _staticHasDescription=false");
-                }
+                println!("✅ Analysis successful!");
+                println!("   has_description: {}", result.has_description);
             }
             Err(e) => {
-                println!("   ❌ Error: {}", e);
+                println!("❌ Analysis failed: {}", e);
             }
         }
     }
 
-    println!("\n🎉 Analysis complete!");
-    Ok(())
+    println!("\n🏁 Test complete!");
 }

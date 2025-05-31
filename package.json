@@ -1,0 +1,51 @@
+{
+  "name": "qwik-analyzer",
+  "version": "0.1.0",
+  "description": "Fast Qwik component analyzer using OXC and Rust",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "napi": {
+    "name": "qwik-analyzer",
+    "triples": {
+      "defaults": true,
+      "additional": [
+        "x86_64-unknown-linux-musl",
+        "aarch64-unknown-linux-gnu",
+        "i686-pc-windows-msvc",
+        "armv7-unknown-linux-gnueabihf",
+        "aarch64-apple-darwin",
+        "aarch64-pc-windows-msvc",
+        "aarch64-unknown-linux-musl",
+        "riscv64gc-unknown-linux-gnu",
+        "s390x-unknown-linux-gnu"
+      ]
+    }
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.4",
+    "@types/node": "^20.0.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.0.0"
+  },
+  "peerDependencies": {
+    "vite": "^4.0.0 || ^5.0.0"
+  },
+  "scripts": {
+    "artifacts": "napi artifacts",
+    "build": "napi build --platform --release && tsc",
+    "build:debug": "napi build --platform && tsc",
+    "build:rust": "napi build --platform --release",
+    "build:ts": "tsc",
+    "prepublishOnly": "napi prepublish -t npm",
+    "test": "cargo test",
+    "universal": "napi universal",
+    "version": "napi version"
+  },
+  "packageManager": "pnpm@8.15.0",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "plugin.js",
+    "plugin.d.ts"
+  ]
+}

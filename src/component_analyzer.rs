@@ -9,6 +9,14 @@ use std::path::Path;
 
 use crate::{parse_file_with_semantic, AnalysisResult, CandidateComponent, Result};
 
+/// Internal result for component analysis with more details
+#[derive(Debug)]
+struct DetailedAnalysisResult {
+    has_description: bool,
+    found_directly: bool,
+    candidate_components: Vec<CandidateComponent>,
+}
+
 /// Checks if the code contains imports from a specific package using semantic analysis.
 pub fn check_imports_from_package_semantic(semantic: &Semantic, package_name: &str) -> bool {
     println!("🔍 Checking for imports from package: '{}'", package_name);
@@ -29,11 +37,11 @@ pub fn check_imports_from_package_semantic(semantic: &Semantic, package_name: &s
 }
 
 /// Finds JSX components within parent components using semantic analysis.
-pub fn find_component_within_parent_semantic(
+fn find_component_within_parent_semantic(
     semantic: &Semantic,
     parent_component: &str,
     child_component: &str,
-) -> AnalysisResult {
+) -> DetailedAnalysisResult {
     let mut found_directly = false;
     let mut candidate_components = Vec::new();
     let mut in_parent_component = false;
@@ -89,7 +97,7 @@ pub fn find_component_within_parent_semantic(
         candidate_components.len()
     );
 
-    AnalysisResult {
+    DetailedAnalysisResult {
         has_description: found_directly,
         found_directly,
         candidate_components,
@@ -171,8 +179,8 @@ pub fn analyze_file_with_semantics(file_path: &Path) -> Result<AnalysisResult> {
     if !check_imports_from_package_semantic(&semantic, "@kunai-consulting/qwik") {
         return Ok(AnalysisResult {
             has_description: false,
-            found_directly: false,
-            candidate_components: Vec::new(),
+            file_path: file_path.to_string_lossy().to_string(),
+            dependencies: Vec::new(),
         });
     }
 
@@ -194,7 +202,11 @@ pub fn analyze_file_with_semantics(file_path: &Path) -> Result<AnalysisResult> {
         }
     }
 
-    Ok(result)
+    Ok(AnalysisResult {
+        has_description: result.has_description,
+        file_path: file_path.to_string_lossy().to_string(),
+        dependencies: Vec::new(), // TODO: Extract actual dependencies
+    })
 }
 
 // Legacy functions for backward compatibility
@@ -212,8 +224,8 @@ pub fn find_component_within_parent(
 
     AnalysisResult {
         has_description,
-        found_directly: has_description,
-        candidate_components: Vec::new(),
+        file_path: String::new(),
+        dependencies: Vec::new(),
     }
 }
 
@@ -293,79 +305,94 @@ pub fn resolve_import_sources_semantic(
         }
     }
 
-    println!("📋 Import resolution complete");
+    // Log results
+    for candidate in candidate_components.iter() {
+        if let Some(import_source) = &candidate.import_source {
+            println!(
+                "📋 Candidate '{}' resolved to '{}'",
+                candidate.component_name, import_source
+            );
+        } else {
+            println!(
+                "⚠️  Candidate '{}' could not be resolved",
+                candidate.component_name
+            );
+        }
+    }
 }
 
-/// Recursively analyze candidate components to find indirect Checkbox.Description usage
+/// Recursively find components that provide descriptions
 pub fn find_indirect_components(
     candidate_components: &mut [CandidateComponent],
     importer: &Path,
 ) -> Result<bool> {
-    println!(
-        "🔍 Analyzing {} candidate components for indirect usage",
-        candidate_components.len()
-    );
-
-    let mut found_indirect = false;
+    let mut found_description = false;
 
     for candidate in candidate_components.iter_mut() {
         if let Some(import_source) = &candidate.import_source {
             println!(
-                "📁 Checking candidate '{}' from import '{}'",
+                "🔍 Analyzing candidate '{}' from '{}'",
                 candidate.component_name, import_source
             );
 
-            // Resolve the import path relative to the importer
-            if let Ok(resolved_path) = resolve_import_path(import_source, importer) {
-                candidate.resolved_path = Some(resolved_path.clone());
+            // Resolve the import path
+            match resolve_import_path(import_source, importer) {
+                Ok(resolved_path) => {
+                    candidate.resolved_path = Some(resolved_path.clone());
+                    println!("📂 Resolved to: {}", resolved_path);
 
-                // Try different file extensions
-                let possible_files = vec![
-                    format!("{}.tsx", resolved_path),
-                    format!("{}.ts", resolved_path),
-                    format!("{}.jsx", resolved_path),
-                    format!("{}.js", resolved_path),
-                    format!("{}/index.tsx", resolved_path),
-                    format!("{}/index.ts", resolved_path),
-                    format!("{}/index.jsx", resolved_path),
-                    format!("{}/index.js", resolved_path),
-                ];
-
-                for file_path in possible_files {
-                    let path = Path::new(&file_path);
-                    if path.exists() {
-                        println!("📄 Found file: {}", file_path);
-
-                        // For indirect analysis, check if this component contains Checkbox.Description anywhere
-                        // Since when it's used inside Checkbox.Root, that content is in scope
-                        match analyze_component_for_description(path) {
-                            Ok(has_description) => {
-                                if has_description {
-                                    println!(
-                                        "🎯 Component '{}' provides Checkbox.Description!",
-                                        candidate.component_name
-                                    );
-                                    candidate.provides_description = true;
-                                    found_indirect = true;
-                                }
-                            }
-                            Err(e) => {
-                                println!("❌ Error analyzing {}: {}", file_path, e);
+                    // Analyze the resolved component file
+                    match analyze_component_for_description(Path::new(&resolved_path)) {
+                        Ok(provides_description) => {
+                            candidate.provides_description = provides_description;
+                            if provides_description {
+                                println!(
+                                    "✅ Component '{}' provides description!",
+                                    candidate.component_name
+                                );
+                                found_description = true;
+                            } else {
+                                println!(
+                                    "❌ Component '{}' does not provide description",
+                                    candidate.component_name
+                                );
                             }
                         }
-                        break; // Found the file, stop trying extensions
+                        Err(e) => {
+                            println!(
+                                "⚠️  Could not analyze component '{}': {}",
+                                candidate.component_name, e
+                            );
+                        }
                     }
                 }
+                Err(e) => {
+                    println!(
+                        "⚠️  Could not resolve import path for '{}': {}",
+                        candidate.component_name, e
+                    );
+                }
             }
+        } else {
+            println!(
+                "⚠️  Candidate '{}' has no import source",
+                candidate.component_name
+            );
         }
     }
 
-    println!("📊 Indirect analysis complete - found: {}", found_indirect);
-    Ok(found_indirect)
+    Ok(found_description)
 }
 
-/// Analyze a component file to see if it contains Checkbox.Description (for indirect analysis)
+/// Analyze a component file to see if it contains Checkbox.Description
 fn analyze_component_for_description(file_path: &Path) -> Result<bool> {
+    println!("🔍 Analyzing component file: {}", file_path.display());
+
+    if !file_path.exists() {
+        println!("❌ File does not exist: {}", file_path.display());
+        return Ok(false);
+    }
+
     let source_text = fs::read_to_string(file_path)?;
     let allocator = Allocator::default();
     let source_type = oxc_span::SourceType::from_path(file_path).unwrap_or_default();
@@ -377,6 +404,7 @@ fn analyze_component_for_description(file_path: &Path) -> Result<bool> {
 
     if !errors.is_empty() {
         eprintln!("Parser errors in {}: {:?}", file_path.display(), errors);
+        return Ok(false);
     }
 
     // Build semantic information
@@ -392,71 +420,63 @@ fn analyze_component_for_description(file_path: &Path) -> Result<bool> {
 
     let semantic = semantic_ret.semantic;
 
-    // Check for imports from target package
-    if !check_imports_from_package_semantic(&semantic, "@kunai-consulting/qwik") {
-        return Ok(false);
-    }
+    // Check if this component contains Checkbox.Description anywhere
+    let contains_description = contains_checkbox_description_anywhere(&semantic);
 
-    // For indirect analysis: check if this component contains Checkbox.Description anywhere
-    // Since when used inside Checkbox.Root, the content is effectively in scope
-    Ok(contains_checkbox_description_anywhere(&semantic))
+    println!(
+        "📊 File {} contains Checkbox.Description: {}",
+        file_path.display(),
+        contains_description
+    );
+
+    Ok(contains_description)
 }
 
+/// Simple function to analyze file for description
 pub fn analyze_file_for_description(file_path: &str) -> Result<bool> {
-    let source_text = fs::read_to_string(file_path)?;
-    let path = Path::new(file_path);
-
-    parse_file_with_semantic(&source_text, path)?;
-    Ok(source_text.contains("Checkbox.Description"))
+    analyze_component_for_description(Path::new(file_path))
 }
 
+/// Resolve import path relative to importer
 fn resolve_import_path(import_source: &str, importer: &Path) -> Result<String> {
-    if import_source.starts_with('.') {
-        // Relative import - resolve relative to the importing file
-        let parent = importer.parent().unwrap_or(Path::new("."));
-        let resolved = parent.join(import_source);
+    let importer_dir = importer.parent().ok_or("Could not get parent directory")?;
 
-        // Normalize the path to handle .. and . components
-        if let Ok(canonical) = resolved.canonicalize() {
-            Ok(canonical.to_string_lossy().to_string())
-        } else {
-            // If canonicalize fails, try to clean up the path manually
-            Ok(resolved.to_string_lossy().to_string())
-        }
-    } else if import_source.starts_with('/') {
-        // Absolute import
-        Ok(import_source.to_string())
+    let resolved = if import_source.starts_with('.') {
+        // Relative import
+        importer_dir.join(import_source)
     } else {
-        // Module import - for now, just return as-is
-        // In a real project, this would need node_modules resolution
-        println!(
-            "⚠️  Module import '{}' - would need node_modules resolution",
-            import_source
-        );
-        Err(format!(
-            "Module import resolution not implemented: {}",
-            import_source
-        )
-        .into())
+        // Absolute or node_modules import - for now, just return as-is
+        return Ok(import_source.to_string());
+    };
+
+    // Try different extensions
+    for ext in &[".tsx", ".ts", ".jsx", ".js"] {
+        let with_ext = resolved.with_extension(&ext[1..]);
+        if with_ext.exists() {
+            return Ok(with_ext.to_string_lossy().to_string());
+        }
+
+        // Also try with index file
+        let index_path = resolved.join(format!("index{}", ext));
+        if index_path.exists() {
+            return Ok(index_path.to_string_lossy().to_string());
+        }
     }
+
+    // If not found, return the resolved path anyway
+    Ok(resolved.to_string_lossy().to_string())
 }
 
-/// Check if a file contains Checkbox.Description anywhere (for indirect analysis)
+/// Check if semantic analysis contains Checkbox.Description anywhere
 pub fn contains_checkbox_description_anywhere(semantic: &Semantic) -> bool {
-    println!("🔍 Checking for Checkbox.Description anywhere in the file");
-
-    // Walk through all nodes to find any Checkbox.Description
     for node in semantic.nodes().iter() {
         if let AstKind::JSXElement(jsx_element) = node.kind() {
             if let Some(element_name) = extract_jsx_element_name(jsx_element) {
-                if element_name == "Checkbox.Description" || element_name.contains("Description") {
-                    println!("🎯 Found Checkbox.Description anywhere: '{}'", element_name);
+                if element_name == "Checkbox.Description" {
                     return true;
                 }
             }
         }
     }
-
-    println!("❌ No Checkbox.Description found anywhere");
     false
 }
