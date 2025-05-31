@@ -547,63 +547,6 @@ fn resolve_import_path(import_source: &str, importer: &Path) -> Result<String> {
     Err(format!("Could not resolve import: {}", import_source).into())
 }
 
-/// Find isComponentPresent() calls and prepare transformations
-fn find_and_prepare_transformations(
-    semantic: &Semantic,
-    has_description: bool,
-) -> Vec<Transformation> {
-    let mut transformations = Vec::new();
-    let source_text = semantic.source_text();
-
-    for node in semantic.nodes().iter() {
-        if let AstKind::CallExpression(call_expr) = node.kind() {
-            if let Some(function_name) = extract_function_name(call_expr) {
-                if function_name == "isComponentPresent" {
-                    // Only transform if this is a proper function call (not part of import/export)
-                    // Check if the call has arguments and is in a valid context
-                    if !call_expr.arguments.is_empty() {
-                        // Get the span of the call expression
-                        let span = call_expr.span;
-                        let start = span.start as u32;
-                        let end = span.end as u32;
-                        let replacement = if has_description { "true" } else { "false" };
-
-                        // Extract the actual source text for debugging
-                        let actual_text = if (start as usize) < source_text.len()
-                            && (end as usize) <= source_text.len()
-                        {
-                            &source_text[(start as usize)..(end as usize)]
-                        } else {
-                            "INVALID_SPAN"
-                        };
-
-                        println!(
-                            "🔄 Preparing transformation: {}..{} -> {} (call: {})",
-                            start, end, replacement, function_name
-                        );
-                        println!("📝 Actual source text at span: '{}'", actual_text);
-
-                        // Show context around the span for debugging
-                        let context_start = if start >= 20 { start - 20 } else { 0 };
-                        let context_end = std::cmp::min(end + 20, source_text.len() as u32);
-                        let context =
-                            &source_text[(context_start as usize)..(context_end as usize)];
-                        println!("📖 Context: '{}'", context);
-
-                        transformations.push(Transformation {
-                            start,
-                            end,
-                            replacement: replacement.to_string(),
-                        });
-                    }
-                }
-            }
-        }
-    }
-
-    transformations
-}
-
 /// Find isComponentPresent() calls in component definitions and prepare prop-based transformations
 fn find_and_prepare_component_transformations(semantic: &Semantic) -> Vec<Transformation> {
     let mut transformations = Vec::new();
@@ -623,6 +566,13 @@ fn find_and_prepare_component_transformations(semantic: &Semantic) -> Vec<Transf
                             if let Some(component_name) =
                                 extract_component_name_from_argument(component_arg)
                             {
+                                // Check if we need to add props parameter to the component function
+                                if let Some(props_transformation) =
+                                    check_and_add_props_parameter(semantic, call_span.start)
+                                {
+                                    transformations.push(props_transformation);
+                                }
+
                                 // Transform: isComponentPresent(Description)
                                 // ->        isComponentPresent(Description, props.__qwik_analyzer_has_Description)
                                 let prop_name = format!("__qwik_analyzer_has_{}", component_name);
@@ -647,6 +597,96 @@ fn find_and_prepare_component_transformations(semantic: &Semantic) -> Vec<Transf
     }
 
     transformations
+}
+
+/// Check if component function needs props parameter and add it if missing
+fn check_and_add_props_parameter(
+    semantic: &Semantic,
+    call_position: u32,
+) -> Option<Transformation> {
+    // Find the component$ function that contains this call
+    for node in semantic.nodes().iter() {
+        if let AstKind::CallExpression(call_expr) = node.kind() {
+            // Check if this is a component$ call
+            if let Some(function_name) = extract_function_name(call_expr) {
+                if function_name == "component$" {
+                    // Check if this call contains our isComponentPresent call
+                    let call_start = call_expr.span.start;
+                    let call_end = call_expr.span.end;
+
+                    if call_position >= call_start && call_position <= call_end {
+                        // Found the component$ call that contains our isComponentPresent
+                        // Check if it has a props parameter
+                        return check_component_arrow_function_params(call_expr);
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Check component$() arrow function parameters and add props if missing
+fn check_component_arrow_function_params(call_expr: &CallExpression) -> Option<Transformation> {
+    if let Some(first_arg) = call_expr.arguments.first() {
+        if let oxc_ast::ast::Argument::ArrowFunctionExpression(arrow_fn) = first_arg {
+            // Check if the function already has parameters
+            if arrow_fn.params.items.is_empty() && arrow_fn.params.rest.is_none() {
+                // No parameters - we need to add props
+                let params_span = arrow_fn.params.span;
+                let start = params_span.start as u32;
+                let end = params_span.end as u32;
+
+                // Transform () => { ... } to (props) => { ... }
+                let replacement = "(props)".to_string();
+
+                println!(
+                    "🔄 Adding props parameter: {}..{} -> {}",
+                    start, end, replacement
+                );
+
+                return Some(Transformation {
+                    start,
+                    end,
+                    replacement,
+                });
+            } else {
+                // Function already has parameters - check if one is named 'props'
+                let has_props = arrow_fn.params.items.iter().any(|param| {
+                    if let oxc_ast::ast::BindingPatternKind::BindingIdentifier(ident) =
+                        &param.pattern.kind
+                    {
+                        ident.name.as_str() == "props"
+                    } else {
+                        false
+                    }
+                });
+
+                if !has_props {
+                    // Has parameters but no 'props' - we need to add props as first parameter
+                    let params_start = arrow_fn.params.span.start as u32;
+
+                    // Insert props as first parameter
+                    let insertion_point = params_start + 1; // After the opening (
+                    let replacement = "props, ".to_string();
+
+                    println!(
+                        "🔄 Adding props as first parameter at position {}",
+                        insertion_point
+                    );
+
+                    return Some(Transformation {
+                        start: insertion_point,
+                        end: insertion_point,
+                        replacement,
+                    });
+                }
+            }
+        }
+    }
+
+    None
 }
 
 /// Analyze Root component usage and generate consumer-side prop injections
