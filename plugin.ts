@@ -52,6 +52,14 @@ class NAPIWrapper {
 
   async analyzeAndTransformCode(code: string, filePath: string, moduleSpecifier?: string): Promise<string> {
     const module = await this.getModule();
+    debug(`NAPI module available functions: ${Object.keys(module).join(', ')}`);
+    
+    if (typeof module.analyzeAndTransformCode !== 'function') {
+      debug(`analyzeAndTransformCode is not a function, it's a ${typeof module.analyzeAndTransformCode}`);
+      throw new Error('analyzeAndTransformCode is not a function');
+    }
+    
+    debug(`Calling analyzeAndTransformCode with file: ${filePath}`);
     return module.analyzeAndTransformCode(code, filePath, moduleSpecifier);
   }
 

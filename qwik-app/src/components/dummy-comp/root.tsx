@@ -2,7 +2,7 @@ import { component$, Slot } from "@builder.io/qwik";
 import { Description } from "./description";
 import { isComponentPresent } from "../../utils/qwik-analyzer";
 
-export const Root = component$(() => {
+export const Root = component$((props) => {
   const isDescription = isComponentPresent(Description);
 
   return (  
