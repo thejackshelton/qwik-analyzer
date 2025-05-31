@@ -39,8 +39,8 @@ async function runIntegrationTests() {
     {
       name: 'Heyo Component',
       file: '../qwik-app/src/examples/heyo.tsx', 
-      expectedHasDescription: true,
-      description: 'Should detect Checkbox.Description in standalone component'
+      expectedHasDescription: false,
+      description: 'Should return false - contains Checkbox.Description but not within Checkbox.Root'
     }
   ];
 

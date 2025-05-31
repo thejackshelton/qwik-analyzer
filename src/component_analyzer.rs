@@ -7,13 +7,12 @@ use oxc_span;
 use std::fs;
 use std::path::Path;
 
-use crate::{parse_file_with_semantic, AnalysisResult, CandidateComponent, Result};
+use crate::{AnalysisResult, CandidateComponent, Result};
 
 /// Internal result for component analysis with more details
 #[derive(Debug)]
 struct DetailedAnalysisResult {
     has_description: bool,
-    found_directly: bool,
     candidate_components: Vec<CandidateComponent>,
 }
 
@@ -99,7 +98,6 @@ fn find_component_within_parent_semantic(
 
     DetailedAnalysisResult {
         has_description: found_directly,
-        found_directly,
         candidate_components,
     }
 }
@@ -207,26 +205,6 @@ pub fn analyze_file_with_semantics(file_path: &Path) -> Result<AnalysisResult> {
         file_path: file_path.to_string_lossy().to_string(),
         dependencies: Vec::new(), // TODO: Extract actual dependencies
     })
-}
-
-// Legacy functions for backward compatibility
-pub fn check_imports_from_package(source_text: &str, package_name: &str) -> bool {
-    source_text.contains(package_name)
-}
-
-pub fn find_component_within_parent(
-    source_text: &str,
-    parent_component: &str,
-    child_component: &str,
-) -> AnalysisResult {
-    let has_description =
-        source_text.contains(&format!("{}.{}", parent_component, child_component));
-
-    AnalysisResult {
-        has_description,
-        file_path: String::new(),
-        dependencies: Vec::new(),
-    }
 }
 
 /// Resolve import sources for candidate components using semantic analysis
@@ -430,11 +408,6 @@ fn analyze_component_for_description(file_path: &Path) -> Result<bool> {
     );
 
     Ok(contains_description)
-}
-
-/// Simple function to analyze file for description
-pub fn analyze_file_for_description(file_path: &str) -> Result<bool> {
-    analyze_component_for_description(Path::new(file_path))
 }
 
 /// Resolve import path relative to importer
