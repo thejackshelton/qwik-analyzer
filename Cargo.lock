@@ -843,6 +843,7 @@ dependencies = [
  "oxc_span",
  "oxc_syntax",
  "oxc_transformer",
+ "phf",
 ]
 
 [[package]]

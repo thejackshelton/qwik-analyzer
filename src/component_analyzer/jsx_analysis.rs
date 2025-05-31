@@ -1,8 +1,161 @@
 use oxc_ast::ast::JSXOpeningElement;
 use oxc_ast::AstKind;
 use oxc_semantic::Semantic;
+use phf::phf_set;
 
 use crate::component_analyzer::utils::debug;
+
+const HTML_TAGS: phf::Set<&'static str> = phf_set![
+    "a",
+    "abbr",
+    "acronym",
+    "address",
+    "applet",
+    "area",
+    "article",
+    "aside",
+    "audio",
+    "b",
+    "base",
+    "basefont",
+    "bdi",
+    "bdo",
+    "bgsound",
+    "big",
+    "blink",
+    "blockquote",
+    "body",
+    "br",
+    "button",
+    "canvas",
+    "caption",
+    "center",
+    "cite",
+    "code",
+    "col",
+    "colgroup",
+    "command",
+    "content",
+    "data",
+    "datalist",
+    "dd",
+    "del",
+    "details",
+    "dfn",
+    "dialog",
+    "dir",
+    "div",
+    "dl",
+    "dt",
+    "element",
+    "em",
+    "embed",
+    "fieldset",
+    "figcaption",
+    "figure",
+    "font",
+    "footer",
+    "form",
+    "frame",
+    "frameset",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "head",
+    "header",
+    "hgroup",
+    "hr",
+    "html",
+    "i",
+    "iframe",
+    "image",
+    "img",
+    "input",
+    "ins",
+    "isindex",
+    "kbd",
+    "keygen",
+    "label",
+    "legend",
+    "li",
+    "link",
+    "listing",
+    "main",
+    "map",
+    "mark",
+    "marquee",
+    "math",
+    "menu",
+    "menuitem",
+    "meta",
+    "meter",
+    "multicol",
+    "nav",
+    "nextid",
+    "nobr",
+    "noembed",
+    "noframes",
+    "noscript",
+    "object",
+    "ol",
+    "optgroup",
+    "option",
+    "output",
+    "p",
+    "param",
+    "picture",
+    "plaintext",
+    "pre",
+    "progress",
+    "q",
+    "rb",
+    "rbc",
+    "rp",
+    "rt",
+    "rtc",
+    "ruby",
+    "s",
+    "samp",
+    "script",
+    "search",
+    "section",
+    "select",
+    "shadow",
+    "slot",
+    "small",
+    "source",
+    "spacer",
+    "span",
+    "strike",
+    "strong",
+    "style",
+    "sub",
+    "summary",
+    "sup",
+    "svg",
+    "table",
+    "tbody",
+    "td",
+    "template",
+    "textarea",
+    "tfoot",
+    "th",
+    "thead",
+    "time",
+    "title",
+    "tr",
+    "track",
+    "tt",
+    "u",
+    "ul",
+    "var",
+    "video",
+    "wbr",
+    "xmp",
+];
 
 pub fn extract_imported_jsx_components(semantic: &Semantic) -> Vec<String> {
     let mut components = Vec::new();
@@ -85,44 +238,5 @@ fn extract_jsx_member_object_name(
 }
 
 fn is_html_element(name: &str) -> bool {
-    matches!(
-        name.to_lowercase().as_str(),
-        "div"
-            | "span"
-            | "p"
-            | "h1"
-            | "h2"
-            | "h3"
-            | "h4"
-            | "h5"
-            | "h6"
-            | "a"
-            | "img"
-            | "input"
-            | "button"
-            | "form"
-            | "ul"
-            | "ol"
-            | "li"
-            | "table"
-            | "tr"
-            | "td"
-            | "th"
-            | "thead"
-            | "tbody"
-            | "nav"
-            | "header"
-            | "footer"
-            | "main"
-            | "section"
-            | "article"
-            | "aside"
-            | "details"
-            | "summary"
-            | "dialog"
-            | "canvas"
-            | "svg"
-            | "video"
-            | "audio"
-    )
+    HTML_TAGS.contains(&name.to_lowercase())
 }
