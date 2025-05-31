@@ -27,7 +27,7 @@ fn main() {
         match analyzer.analyze_file(path) {
             Ok(result) => {
                 println!("✅ Analysis successful!");
-                println!("   has_description: {}", result.has_description);
+                println!("   has_component: {}", result.has_component);
             }
             Err(e) => {
                 println!("❌ Analysis failed: {}", e);

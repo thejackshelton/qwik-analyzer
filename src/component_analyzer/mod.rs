@@ -36,7 +36,7 @@ pub fn analyze_code_with_semantics(
     if !errors.is_empty() {
         eprintln!("Parser errors: {:?}", errors);
         return Ok(AnalysisResult {
-            has_description: false,
+            has_component: false,
             file_path: file_path.to_string_lossy().to_string(),
             dependencies: Vec::new(),
             transformations: Vec::new(),
@@ -86,7 +86,7 @@ pub fn analyze_code_with_semantics(
     transformations.extend(current_file_component_transformations);
 
     Ok(AnalysisResult {
-        has_description: has_any_component,
+        has_component: has_any_component,
         file_path: file_path.to_string_lossy().to_string(),
         dependencies: Vec::new(),
         transformations,

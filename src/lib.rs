@@ -14,7 +14,7 @@ pub struct Transformation {
 #[derive(Debug)]
 #[napi(object)]
 pub struct AnalysisResult {
-    pub has_description: bool,
+    pub has_component: bool,
     pub file_path: String,
     pub dependencies: Vec<String>,
     pub transformations: Vec<Transformation>,
