@@ -6,7 +6,7 @@ import AliasExample from "../examples/aliased_example";
 
 export default component$(() => {
   return (
-    <IndirectExample />
+    <AliasExample />
   );
 });
 

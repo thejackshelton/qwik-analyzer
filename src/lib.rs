@@ -54,12 +54,9 @@ pub fn parse_file_with_semantic(source_text: &str, file_path: &Path) -> Result<(
 }
 
 #[napi]
-pub fn analyze_file(
-    file_path: String,
-    module_specifier: Option<String>,
-) -> napi::Result<AnalysisResult> {
+pub fn analyze_file(file_path: String) -> napi::Result<AnalysisResult> {
     let path = Path::new(&file_path);
-    match component_analyzer::analyze_file_with_semantics(path, module_specifier.as_deref()) {
+    match component_analyzer::analyze_file_with_semantics(path) {
         Ok(result) => Ok(result),
         Err(e) => Err(napi::Error::new(
             napi::Status::GenericFailure,
@@ -69,25 +66,17 @@ pub fn analyze_file(
 }
 
 #[napi]
-pub fn analyze_file_changed(file_path: String, _event: String, module_specifier: Option<String>) {
-    if let Err(e) = analyze_file(file_path.clone(), module_specifier) {
+pub fn analyze_file_changed(file_path: String, _event: String) {
+    if let Err(e) = analyze_file(file_path.clone()) {
         eprintln!("Error analyzing changed file {}: {}", file_path, e);
     }
 }
 
 /// Analyze and transform code content directly (for Vite integration)
 #[napi]
-pub fn analyze_and_transform_code(
-    code: String,
-    file_path: String,
-    module_specifier: Option<String>,
-) -> napi::Result<String> {
+pub fn analyze_and_transform_code(code: String, file_path: String) -> napi::Result<String> {
     let path = Path::new(&file_path);
-    let result = match component_analyzer::analyze_code_with_semantics(
-        &code,
-        path,
-        module_specifier.as_deref(),
-    ) {
+    let result = match component_analyzer::analyze_code_with_semantics(&code, path) {
         Ok(result) => result,
         Err(e) => {
             return Err(napi::Error::new(
@@ -103,10 +92,10 @@ pub fn analyze_and_transform_code(
 
     // Apply transformations in reverse order to maintain offsets
     let mut transformed_code = code;
-    let mut sorted_transformations = result.transformations;
-    sorted_transformations.sort_by(|a, b| b.start.cmp(&a.start));
+    let mut transformations = result.transformations;
+    transformations.sort_by(|a, b| b.start.cmp(&a.start));
 
-    for transformation in sorted_transformations {
+    for transformation in &transformations {
         let start = transformation.start as usize;
         let end = transformation.end as usize;
 
