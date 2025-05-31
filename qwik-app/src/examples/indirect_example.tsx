@@ -7,6 +7,7 @@ export default component$(() => {
     <DummyComp.Root>
       <button type="button">Some trigger</button>
       <Heyo />
+      <DummyComp.Title />
     </DummyComp.Root>
   );
 }); 
