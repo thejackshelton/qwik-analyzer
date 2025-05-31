@@ -13,8 +13,8 @@ pub mod transformations;
 pub mod utils;
 
 use jsx_analysis::extract_imported_jsx_components;
-use component_presence::find_is_component_present_calls_in_imported_component;
-use transformations::{generate_transformations_for_current_file, generate_transformations_for_current_file_components};
+use component_presence::find_presence_calls;
+use transformations::{transform_file, transform_components};
 use utils::debug;
 
 pub fn analyze_file_with_semantics(file_path: &Path) -> Result<AnalysisResult> {
@@ -55,13 +55,13 @@ pub fn analyze_code_with_semantics(
 
     let mut all_component_calls = Vec::new();
     for jsx_component in jsx_components {
-        if let Ok(calls) = find_is_component_present_calls_in_imported_component(semantic, &jsx_component, file_path) {
+        if let Ok(calls) = find_presence_calls(semantic, &jsx_component, file_path) {
             all_component_calls.extend(calls);
         }
     }
 
     for call in &mut all_component_calls {
-        call.is_present_in_subtree = component_presence::is_component_present_in_jsx_subtree(semantic, &call.component_name, file_path)?;
+        call.is_present_in_subtree = component_presence::has_component(semantic, &call.component_name, file_path)?;
     }
 
     debug(&format!("📊 Analysis found {} isComponentPresent calls from imported components, {} have target components in current file", 
@@ -78,11 +78,11 @@ pub fn analyze_code_with_semantics(
     }
 
     if has_any_component {
-        let current_file_transformations = generate_transformations_for_current_file(semantic, &all_component_calls)?;
+        let current_file_transformations = transform_file(semantic, &all_component_calls)?;
         transformations.extend(current_file_transformations);
     }
 
-    let current_file_component_transformations = generate_transformations_for_current_file_components(semantic, file_path)?;
+    let current_file_component_transformations = transform_components(semantic, file_path)?;
     transformations.extend(current_file_component_transformations);
 
     Ok(AnalysisResult {

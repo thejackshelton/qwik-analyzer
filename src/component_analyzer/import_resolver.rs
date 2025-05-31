@@ -18,27 +18,30 @@ pub fn find_import_source_for_component(
     component_name: &str,
 ) -> Option<String> {
     for node in semantic.nodes().iter() {
-        if let AstKind::ImportDeclaration(import_decl) = node.kind() {
-            let module_source = import_decl.source.value.to_string();
+        let AstKind::ImportDeclaration(import_decl) = node.kind() else {
+            continue;
+        };
 
-            if let Some(specifiers) = &import_decl.specifiers {
-                for spec in specifiers {
-                    let local_name = match spec {
-                        oxc_ast::ast::ImportDeclarationSpecifier::ImportSpecifier(spec) => {
-                            spec.local.name.to_string()
-                        }
-                        oxc_ast::ast::ImportDeclarationSpecifier::ImportDefaultSpecifier(spec) => {
-                            spec.local.name.to_string()
-                        }
-                        oxc_ast::ast::ImportDeclarationSpecifier::ImportNamespaceSpecifier(
-                            spec,
-                        ) => spec.local.name.to_string(),
-                    };
+        let module_source = import_decl.source.value.to_string();
+        let Some(specifiers) = &import_decl.specifiers else {
+            continue;
+        };
 
-                    if local_name == component_name {
-                        return Some(module_source);
-                    }
+        for spec in specifiers {
+            let local_name = match spec {
+                oxc_ast::ast::ImportDeclarationSpecifier::ImportSpecifier(spec) => {
+                    spec.local.name.to_string()
                 }
+                oxc_ast::ast::ImportDeclarationSpecifier::ImportDefaultSpecifier(spec) => {
+                    spec.local.name.to_string()
+                }
+                oxc_ast::ast::ImportDeclarationSpecifier::ImportNamespaceSpecifier(spec) => {
+                    spec.local.name.to_string()
+                }
+            };
+
+            if local_name == component_name {
+                return Some(module_source);
             }
         }
     }
@@ -46,7 +49,7 @@ pub fn find_import_source_for_component(
     None
 }
 
-pub fn resolve_import_with_oxc(import_source: &str, current_file: &Path) -> Result<String> {
+pub fn resolve_import_path(import_source: &str, current_file: &Path) -> Result<String> {
     let options = ResolveOptions {
         extensions: vec![".tsx".into(), ".ts".into(), ".jsx".into(), ".js".into()],
         ..Default::default()
@@ -64,7 +67,7 @@ pub fn resolve_import_with_oxc(import_source: &str, current_file: &Path) -> Resu
         }
         Err(e) => {
             debug(&format!(
-                "❌ OXC resolution failed for '{}': {:?}",
+                "❌ Import resolution failed for '{}': {:?}",
                 import_source, e
             ));
             Err(format!("Could not resolve import '{}': {:?}", import_source, e).into())
@@ -75,11 +78,7 @@ pub fn resolve_import_with_oxc(import_source: &str, current_file: &Path) -> Resu
 pub fn find_component_file_in_module(module_dir: &str, component_name: &str) -> Result<String> {
     let module_path = Path::new(module_dir);
 
-    let actual_module_dir = if module_dir.ends_with("index.ts")
-        || module_dir.ends_with("index.tsx")
-        || module_dir.ends_with("index.js")
-        || module_dir.ends_with("index.jsx")
-    {
+    let actual_module_dir = if is_index_file(module_dir) {
         module_path
             .parent()
             .ok_or("Could not get module parent directory")?
@@ -108,9 +107,14 @@ pub fn find_component_file_in_module(module_dir: &str, component_name: &str) -> 
     .into())
 }
 
-pub fn analyze_file_for_is_component_present_calls(
-    file_path: &str,
-) -> Result<Vec<ComponentPresenceCall>> {
+fn is_index_file(path: &str) -> bool {
+    path.ends_with("index.ts")
+        || path.ends_with("index.tsx")
+        || path.ends_with("index.js")
+        || path.ends_with("index.jsx")
+}
+
+pub fn find_calls_in_file(file_path: &str) -> Result<Vec<ComponentPresenceCall>> {
     let source_text = fs::read_to_string(file_path)?;
     let allocator = Allocator::default();
     let source_type = SourceType::from_path(Path::new(file_path)).unwrap_or_default();
@@ -129,34 +133,42 @@ pub fn analyze_file_for_is_component_present_calls(
     let mut calls = Vec::new();
 
     for node in semantic.nodes().iter() {
-        if let AstKind::CallExpression(call_expr) = node.kind() {
-            if let Some(function_name) = extract_function_name(call_expr) {
-                if function_name == "isComponentPresent" {
-                    if let Some(first_arg) = call_expr.arguments.first() {
-                        if let Some(component_name) =
-                            extract_component_name_from_argument(first_arg)
-                        {
-                            debug(&format!(
-                                "🔍 Found isComponentPresent({}) call in {}",
-                                component_name, file_path
-                            ));
+        let AstKind::CallExpression(call_expr) = node.kind() else {
+            continue;
+        };
 
-                            calls.push(ComponentPresenceCall {
-                                component_name,
-                                is_present_in_subtree: false,
-                                source_file: file_path.to_string(),
-                            });
-                        }
-                    }
-                }
-            }
+        let Some(function_name) = extract_function_name(call_expr) else {
+            continue;
+        };
+
+        if function_name != "isComponentPresent" {
+            continue;
         }
+
+        let Some(first_arg) = call_expr.arguments.first() else {
+            continue;
+        };
+
+        let Some(component_name) = extract_component_name_from_argument(first_arg) else {
+            continue;
+        };
+
+        debug(&format!(
+            "🔍 Found isComponentPresent({}) call in {}",
+            component_name, file_path
+        ));
+
+        calls.push(ComponentPresenceCall {
+            component_name,
+            is_present_in_subtree: false,
+            source_file: file_path.to_string(),
+        });
     }
 
     Ok(calls)
 }
 
-pub fn analyze_file_for_component_usage(file_path: &str, target_component: &str) -> Result<bool> {
+pub fn file_has_component(file_path: &str, target_component: &str) -> Result<bool> {
     let source_text = fs::read_to_string(file_path)?;
     let allocator = Allocator::default();
     let source_type = SourceType::from_path(Path::new(file_path)).unwrap_or_default();
@@ -174,15 +186,19 @@ pub fn analyze_file_for_component_usage(file_path: &str, target_component: &str)
 
     // Check for target component usage
     for node in semantic.nodes().iter() {
-        if let AstKind::JSXOpeningElement(jsx_opening) = node.kind() {
-            if let Some(element_name) = extract_jsx_element_name(jsx_opening) {
-                if element_name == target_component
-                    || element_name.ends_with(&format!(".{}", target_component))
-                {
-                    debug(&format!("✅ Found {} in {}", target_component, file_path));
-                    return Ok(true);
-                }
-            }
+        let AstKind::JSXOpeningElement(jsx_opening) = node.kind() else {
+            continue;
+        };
+
+        let Some(element_name) = extract_jsx_element_name(jsx_opening) else {
+            continue;
+        };
+
+        if element_name == target_component
+            || element_name.ends_with(&format!(".{}", target_component))
+        {
+            debug(&format!("✅ Found {} in {}", target_component, file_path));
+            return Ok(true);
         }
     }
 

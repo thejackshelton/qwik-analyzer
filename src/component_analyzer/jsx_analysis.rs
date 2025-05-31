@@ -8,35 +8,49 @@ pub fn extract_imported_jsx_components(semantic: &Semantic) -> Vec<String> {
     let mut components = Vec::new();
 
     for node in semantic.nodes().iter() {
-        if let AstKind::JSXOpeningElement(jsx_opening) = node.kind() {
-            if let Some(element_name) = extract_jsx_element_name(jsx_opening) {
-                if element_name.contains('.') {
-                    let parts: Vec<&str> = element_name.split('.').collect();
-                    if parts.len() == 2 {
-                        let component_module = parts[0];
-                        let component_name = parts[1];
-                        let full_component = format!("{}.{}", component_module, component_name);
-                        if !components.contains(&full_component) {
-                            debug(&format!("🏷️  Found imported component: {}", full_component));
-                            components.push(full_component);
-                        }
-                    }
-                } else if element_name
-                    .chars()
-                    .next()
-                    .map_or(false, |c| c.is_ascii_uppercase())
-                    && !is_html_element(&element_name)
-                {
-                    if !components.contains(&element_name) {
-                        components.push(element_name.clone());
-                        debug(&format!("🏷️  Found imported component: {}", element_name));
-                    }
+        let AstKind::JSXOpeningElement(jsx_opening) = node.kind() else {
+            continue;
+        };
+
+        let Some(element_name) = extract_jsx_element_name(jsx_opening) else {
+            continue;
+        };
+
+        // Handle module.Component syntax (e.g., Icons.Home)
+        if element_name.contains('.') {
+            if let Some(full_component) = parse_member_component(&element_name) {
+                if !components.contains(&full_component) {
+                    debug(&format!("🏷️ Found imported component: {}", full_component));
+                    components.push(full_component);
                 }
             }
+            continue;
+        }
+
+        // Handle direct component imports (must start with uppercase and not be HTML)
+        if is_component_name(&element_name) && !components.contains(&element_name) {
+            components.push(element_name.clone());
+            debug(&format!("🏷️ Found imported component: {}", element_name));
         }
     }
 
     components
+}
+
+fn parse_member_component(element_name: &str) -> Option<String> {
+    let parts: Vec<&str> = element_name.split('.').collect();
+    if parts.len() == 2 {
+        Some(format!("{}.{}", parts[0], parts[1]))
+    } else {
+        None
+    }
+}
+
+fn is_component_name(name: &str) -> bool {
+    name.chars()
+        .next()
+        .map_or(false, |c| c.is_ascii_uppercase())
+        && !is_html_element(name)
 }
 
 pub fn extract_jsx_element_name(jsx_opening: &JSXOpeningElement) -> Option<String> {
@@ -54,7 +68,7 @@ pub fn extract_jsx_element_name(jsx_opening: &JSXOpeningElement) -> Option<Strin
     }
 }
 
-pub fn extract_jsx_member_object_name(
+fn extract_jsx_member_object_name(
     object: &oxc_ast::ast::JSXMemberExpressionObject,
 ) -> Option<String> {
     match object {
@@ -70,7 +84,7 @@ pub fn extract_jsx_member_object_name(
     }
 }
 
-pub fn is_html_element(name: &str) -> bool {
+fn is_html_element(name: &str) -> bool {
     matches!(
         name.to_lowercase().as_str(),
         "div"

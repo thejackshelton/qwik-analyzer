@@ -8,7 +8,7 @@ use crate::component_analyzer::utils::{
 };
 use crate::{Result, Transformation};
 
-pub fn generate_transformations_for_current_file(
+pub fn transform_file(
     semantic: &Semantic,
     component_calls: &Vec<ComponentPresenceCall>,
 ) -> Result<Vec<Transformation>> {
@@ -24,7 +24,7 @@ pub fn generate_transformations_for_current_file(
     Ok(transformations)
 }
 
-pub fn generate_jsx_prop_transformations(
+fn generate_jsx_prop_transformations(
     semantic: &Semantic,
     call: &ComponentPresenceCall,
 ) -> Result<Vec<Transformation>> {
@@ -41,135 +41,197 @@ pub fn generate_jsx_prop_transformations(
     ));
 
     for node in semantic.nodes().iter() {
-        if let AstKind::JSXOpeningElement(jsx_opening) = node.kind() {
-            if let Some(element_name) = extract_jsx_element_name(jsx_opening) {
-                let should_add_prop = if element_name.contains('.') {
-                    let parts: Vec<&str> = element_name.split('.').collect();
-                    if parts.len() == 2 {
-                        let component_name = parts[1].to_lowercase();
-                        component_name == source_file_name
-                    } else {
-                        false
-                    }
-                } else {
-                    element_name.to_lowercase() == source_file_name
-                };
+        let AstKind::JSXOpeningElement(jsx_opening) = node.kind() else {
+            continue;
+        };
 
-                if should_add_prop {
-                    debug(&format!(
-                        "🔧 Adding prop to JSX component: {}",
-                        element_name
-                    ));
-                    let prop_name = format!("__qwik_analyzer_has_{}", call.component_name);
-                    let prop_value = call.is_present_in_subtree;
-                    let new_prop = format!(" {}={{{}}}", prop_name, prop_value);
+        let Some(element_name) = extract_jsx_element_name(jsx_opening) else {
+            continue;
+        };
 
-                    let insert_pos = jsx_opening.span.end - 1;
-
-                    transformations.push(Transformation {
-                        start: insert_pos,
-                        end: insert_pos,
-                        replacement: new_prop,
-                    });
-                }
-            }
+        if !should_add_prop_to_component(&element_name, source_file_name) {
+            continue;
         }
+
+        debug(&format!(
+            "🔧 Adding prop to JSX component: {}",
+            element_name
+        ));
+
+        let prop_name = format!("__qwik_analyzer_has_{}", call.component_name);
+        let prop_value = call.is_present_in_subtree;
+        let new_prop = format!(" {}={{{}}}", prop_name, prop_value);
+        let insert_pos = jsx_opening.span.end - 1;
+
+        transformations.push(Transformation {
+            start: insert_pos,
+            end: insert_pos,
+            replacement: new_prop,
+        });
     }
 
     Ok(transformations)
 }
 
-pub fn generate_transformations_for_current_file_components(
+fn should_add_prop_to_component(element_name: &str, source_file_name: &str) -> bool {
+    if element_name.contains('.') {
+        let parts: Vec<&str> = element_name.split('.').collect();
+        if parts.len() == 2 {
+            let component_name = parts[1].to_lowercase();
+            return component_name == source_file_name;
+        }
+        return false;
+    }
+
+    element_name.to_lowercase() == source_file_name
+}
+
+pub fn transform_components(semantic: &Semantic, file_path: &Path) -> Result<Vec<Transformation>> {
+    if !has_component_present_calls(semantic) {
+        return Ok(Vec::new());
+    }
+
+    let source_text = std::fs::read_to_string(file_path)?;
+    let mut transformations = Vec::new();
+
+    // Add props parameter if component doesn't have one
+    if let Some(transformation) =
+        create_props_parameter_transformation(semantic, &source_text, file_path)?
+    {
+        transformations.push(transformation);
+    }
+
+    // Transform isComponentPresent calls
+    let call_transformations = create_component_present_call_transformations(semantic, file_path)?;
+    transformations.extend(call_transformations);
+
+    Ok(transformations)
+}
+
+fn has_component_present_calls(semantic: &Semantic) -> bool {
+    for node in semantic.nodes().iter() {
+        let AstKind::CallExpression(call_expr) = node.kind() else {
+            continue;
+        };
+
+        let Some(function_name) = extract_function_name(call_expr) else {
+            continue;
+        };
+
+        if function_name == "isComponentPresent" {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn create_props_parameter_transformation(
+    semantic: &Semantic,
+    source_text: &str,
+    file_path: &Path,
+) -> Result<Option<Transformation>> {
+    let Some((component_start, component_has_props)) = find_component_info(semantic) else {
+        return Ok(None);
+    };
+
+    if component_has_props {
+        return Ok(None);
+    }
+
+    let component_text = &source_text[component_start as usize..];
+    let Some(paren_pos) = component_text.find('(') else {
+        return Ok(None);
+    };
+
+    let insert_pos = component_start + paren_pos as u32 + 1;
+    debug(&format!(
+        "🔧 Adding props parameter at position {} in {}",
+        insert_pos,
+        file_path.display()
+    ));
+
+    Ok(Some(Transformation {
+        start: insert_pos,
+        end: insert_pos,
+        replacement: "props: any".to_string(),
+    }))
+}
+
+fn find_component_info(semantic: &Semantic) -> Option<(u32, bool)> {
+    for node in semantic.nodes().iter() {
+        let AstKind::CallExpression(call_expr) = node.kind() else {
+            continue;
+        };
+
+        let Some(function_name) = extract_function_name(call_expr) else {
+            continue;
+        };
+
+        if function_name != "component$" {
+            continue;
+        }
+
+        let Some(first_arg) = call_expr.arguments.first() else {
+            continue;
+        };
+
+        let oxc_ast::ast::Argument::ArrowFunctionExpression(arrow_fn) = first_arg else {
+            continue;
+        };
+
+        let component_start = arrow_fn.span.start;
+        let component_has_props = !arrow_fn.params.items.is_empty();
+        return Some((component_start, component_has_props));
+    }
+
+    None
+}
+
+fn create_component_present_call_transformations(
     semantic: &Semantic,
     file_path: &Path,
 ) -> Result<Vec<Transformation>> {
     let mut transformations = Vec::new();
 
-    let mut has_is_component_present_calls = false;
     for node in semantic.nodes().iter() {
-        if let AstKind::CallExpression(call_expr) = node.kind() {
-            if let Some(function_name) = extract_function_name(call_expr) {
-                if function_name == "isComponentPresent" {
-                    has_is_component_present_calls = true;
-                    break;
-                }
-            }
-        }
-    }
+        let AstKind::CallExpression(call_expr) = node.kind() else {
+            continue;
+        };
 
-    if has_is_component_present_calls {
-        let source_text = std::fs::read_to_string(file_path)?;
+        let Some(function_name) = extract_function_name(call_expr) else {
+            continue;
+        };
 
-        let mut component_has_props = false;
-        let mut component_span: Option<(u32, u32)> = None;
-
-        for node in semantic.nodes().iter() {
-            if let AstKind::CallExpression(call_expr) = node.kind() {
-                if let Some(function_name) = extract_function_name(call_expr) {
-                    if function_name == "component$" {
-                        if let Some(first_arg) = call_expr.arguments.first() {
-                            if let oxc_ast::ast::Argument::ArrowFunctionExpression(arrow_fn) =
-                                first_arg
-                            {
-                                component_span = Some((arrow_fn.span.start, arrow_fn.span.end));
-                                component_has_props = !arrow_fn.params.items.is_empty();
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
+        if function_name != "isComponentPresent" {
+            continue;
         }
 
-        if let Some((component_start, _)) = component_span {
-            if !component_has_props {
-                let component_text = &source_text[component_start as usize..];
-                if let Some(paren_pos) = component_text.find('(') {
-                    let insert_pos = component_start + paren_pos as u32 + 1;
-                    transformations.push(Transformation {
-                        start: insert_pos,
-                        end: insert_pos,
-                        replacement: "props: any".to_string(),
-                    });
-                    debug(&format!(
-                        "🔧 Adding props parameter at position {} in {}",
-                        insert_pos,
-                        file_path.display()
-                    ));
-                }
-            }
-        }
+        let Some(first_arg) = call_expr.arguments.first() else {
+            continue;
+        };
 
-        for node in semantic.nodes().iter() {
-            if let AstKind::CallExpression(call_expr) = node.kind() {
-                if let Some(function_name) = extract_function_name(call_expr) {
-                    if function_name == "isComponentPresent" {
-                        if let Some(first_arg) = call_expr.arguments.first() {
-                            if let Some(component_name) =
-                                extract_component_name_from_argument(first_arg)
-                            {
-                                let prop_name = format!("__qwik_analyzer_has_{}", component_name);
-                                let new_call = format!(
-                                    "isComponentPresent({}, props.{})",
-                                    component_name, prop_name
-                                );
+        let Some(component_name) = extract_component_name_from_argument(first_arg) else {
+            continue;
+        };
 
-                                transformations.push(Transformation {
-                                    start: call_expr.span.start,
-                                    end: call_expr.span.end,
-                                    replacement: new_call,
-                                });
-                                debug(&format!(
-                                    "🔧 Transforming isComponentPresent({}) call in {}",
-                                    component_name,
-                                    file_path.display()
-                                ));
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        let prop_name = format!("__qwik_analyzer_has_{}", component_name);
+        let new_call = format!(
+            "isComponentPresent({}, props.{})",
+            component_name, prop_name
+        );
+
+        transformations.push(Transformation {
+            start: call_expr.span.start,
+            end: call_expr.span.end,
+            replacement: new_call,
+        });
+
+        debug(&format!(
+            "🔧 Transforming isComponentPresent({}) call in {}",
+            component_name,
+            file_path.display()
+        ));
     }
 
     Ok(transformations)
