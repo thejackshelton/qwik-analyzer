@@ -3,21 +3,13 @@ use napi_derive::napi;
 use std::path::Path;
 
 pub mod component_analyzer;
-pub mod qwik_analyzer;
 
-pub use qwik_analyzer::QwikAnalyzer;
-
-use oxc_allocator::Allocator;
-use oxc_parser::{Parser, ParserReturn};
-use oxc_semantic::SemanticBuilder;
-use oxc_span::SourceType;
-
-#[derive(Debug, Clone)]
-pub struct CandidateComponent {
-    pub component_name: String,
-    pub import_source: Option<String>,
-    pub resolved_path: Option<String>,
-    pub provides_description: bool,
+#[derive(Debug)]
+#[napi(object)]
+pub struct Transformation {
+    pub start: u32,
+    pub end: u32,
+    pub replacement: String,
 }
 
 #[derive(Debug)]
@@ -26,9 +18,15 @@ pub struct AnalysisResult {
     pub has_description: bool,
     pub file_path: String,
     pub dependencies: Vec<String>,
+    pub transformations: Vec<Transformation>,
 }
 
-pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+use oxc_allocator::Allocator;
+use oxc_parser::{Parser, ParserReturn};
+use oxc_semantic::SemanticBuilder;
+use oxc_span::SourceType;
+
+pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 /// Parse a TypeScript/JavaScript file and return semantic information
 pub fn parse_file_with_semantic(source_text: &str, file_path: &Path) -> Result<()> {
@@ -57,47 +55,68 @@ pub fn parse_file_with_semantic(source_text: &str, file_path: &Path) -> Result<(
 }
 
 #[napi]
-pub fn analyze_file_changed(file_path: String, event: String) -> napi::Result<()> {
-    let analyzer = QwikAnalyzer::new(false);
+pub fn analyze_file(
+    file_path: String,
+    module_specifier: Option<String>,
+) -> napi::Result<AnalysisResult> {
     let path = Path::new(&file_path);
-
-    match event.as_str() {
-        "create" | "update" => {
-            // Just analyze the file - no caching needed
-            match analyzer.analyze_file(path) {
-                Ok(_result) => {
-                    // Analysis complete - results available for next transform/load
-                }
-                Err(e) => {
-                    eprintln!("Failed to analyze {}: {}", file_path, e);
-                }
-            }
-        }
-        "delete" => {
-            // File deleted - nothing to do
-        }
-        _ => {
-            // Unknown event, ignore
-        }
-    }
-
-    Ok(())
-}
-
-#[napi]
-pub fn analyze_file(file_path: String) -> napi::Result<AnalysisResult> {
-    let analyzer = QwikAnalyzer::new(false);
-    let path = Path::new(&file_path);
-
-    match analyzer.analyze_file(path) {
-        Ok(result) => Ok(AnalysisResult {
-            has_description: result.has_description,
-            file_path: file_path.clone(),
-            dependencies: vec![], // TODO: Extract from component analysis
-        }),
-        Err(e) => Err(Error::new(
-            Status::GenericFailure,
+    match component_analyzer::analyze_file_with_semantics(path, module_specifier.as_deref()) {
+        Ok(result) => Ok(result),
+        Err(e) => Err(napi::Error::new(
+            napi::Status::GenericFailure,
             format!("Analysis failed: {}", e),
         )),
     }
+}
+
+#[napi]
+pub fn analyze_file_changed(file_path: String, event: String, module_specifier: Option<String>) {
+    if let Err(e) = analyze_file(file_path.clone(), module_specifier) {
+        eprintln!("Error analyzing changed file {}: {}", file_path, e);
+    }
+}
+
+/// Analyze and transform code content directly (for Vite integration)
+#[napi]
+pub fn analyze_and_transform_code(
+    code: String,
+    file_path: String,
+    module_specifier: Option<String>,
+) -> napi::Result<String> {
+    let path = Path::new(&file_path);
+    let result = match component_analyzer::analyze_code_with_semantics(
+        &code,
+        path,
+        module_specifier.as_deref(),
+    ) {
+        Ok(result) => result,
+        Err(e) => {
+            return Err(napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("Analysis failed: {}", e),
+            ))
+        }
+    };
+
+    if result.transformations.is_empty() {
+        return Ok(code);
+    }
+
+    // Apply transformations in reverse order to maintain offsets
+    let mut transformed_code = code;
+    let mut sorted_transformations = result.transformations;
+    sorted_transformations.sort_by(|a, b| b.start.cmp(&a.start));
+
+    for transformation in sorted_transformations {
+        let start = transformation.start as usize;
+        let end = transformation.end as usize;
+
+        if start <= transformed_code.len() && end <= transformed_code.len() && start <= end {
+            let before = &transformed_code[..start];
+            let after = &transformed_code[end..];
+            transformed_code = format!("{}{}{}", before, transformation.replacement, after);
+        }
+    }
+
+    Ok(transformed_code)
 }

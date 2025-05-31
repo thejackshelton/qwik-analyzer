@@ -18,6 +18,7 @@ interface TestCase {
   file: string;
   expectedHasDescription: boolean;
   description: string;
+  moduleSpecifier?: string;
 }
 
 async function runIntegrationTests() {
@@ -28,19 +29,22 @@ async function runIntegrationTests() {
       name: 'Direct Example',
       file: '../qwik-app/src/examples/direct_example.tsx',
       expectedHasDescription: true,
-      description: 'Should detect Checkbox.Description directly within Checkbox.Root'
+      description: 'Should detect DummyComp.Description directly within DummyComp.Root',
+      moduleSpecifier: '../components/dummy-comp'
     },
     {
       name: 'Indirect Example', 
       file: '../qwik-app/src/examples/indirect_example.tsx',
       expectedHasDescription: true,
-      description: 'Should detect Checkbox.Description via imported Heyo component'
+      description: 'Should detect DummyComp.Description via imported Heyo component with recursive analysis',
+      moduleSpecifier: '../components/dummy-comp'
     },
     {
       name: 'Heyo Component',
       file: '../qwik-app/src/examples/heyo.tsx', 
       expectedHasDescription: false,
-      description: 'Should return false - contains Checkbox.Description but not within Checkbox.Root'
+      description: 'Should return false - contains DummyComp.Description but not within DummyComp.Root',
+      moduleSpecifier: '../components/dummy-comp'
     }
   ];
 
@@ -59,8 +63,8 @@ async function runIntegrationTests() {
     }
 
     try {
-      // Test the NAPI binding
-      const result = await analyzeFile(filePath);
+      // Test the NAPI binding with module specifier
+      const result = await analyzeFile(filePath, testCase.moduleSpecifier);
       
       console.log(`   📊 Analysis result: ${JSON.stringify(result, null, 2)}`);
       
@@ -73,7 +77,7 @@ async function runIntegrationTests() {
 
       // Test file change event
       console.log('   🔄 Testing file change event...');
-      await analyzeFileChanged(filePath, 'update');
+      await analyzeFileChanged(filePath, 'update', testCase.moduleSpecifier);
       console.log('   ✅ File change event processed successfully');
 
     } catch (error) {

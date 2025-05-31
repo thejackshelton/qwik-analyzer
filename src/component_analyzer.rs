@@ -1,155 +1,326 @@
 use oxc_allocator::Allocator;
-use oxc_ast::ast::JSXElement;
+use oxc_ast::ast::{CallExpression, JSXElement};
 use oxc_ast::AstKind;
 use oxc_parser;
 use oxc_semantic::Semantic;
 use oxc_span;
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use crate::{AnalysisResult, CandidateComponent, Result};
+use crate::{AnalysisResult, Result, Transformation};
 
-/// Internal result for component analysis with more details
-#[derive(Debug)]
-struct DetailedAnalysisResult {
-    has_description: bool,
-    candidate_components: Vec<CandidateComponent>,
+/// Semantic symbol information for imports
+#[derive(Debug, Clone)]
+struct ImportSymbol {
+    local_name: String,
+    imported_name: String,
+    module_source: String,
 }
 
-/// Checks if the code contains imports from a specific package using semantic analysis.
-pub fn check_imports_from_package_semantic(semantic: &Semantic, package_name: &str) -> bool {
-    println!("🔍 Checking for imports from package: '{}'", package_name);
+/// Information about a component that calls isComponentPresent
+#[derive(Debug, Clone)]
+struct ComponentWithCheck {
+    component_name: String,
+    checks_for: String,
+}
 
-    // Walk through all nodes to find import declarations using correct iterator
-    for node in semantic.nodes().iter() {
-        if let AstKind::ImportDeclaration(import_decl) = node.kind() {
-            println!("📦 Found import: '{}'", import_decl.source.value);
-            if import_decl.source.value == package_name {
-                println!("✅ Found target package import!");
-                return true;
-            }
-        }
+/// Analyze a file using cross-file component-aware analysis
+pub fn analyze_file_with_semantics(
+    file_path: &Path,
+    module_specifier: Option<&str>,
+) -> Result<AnalysisResult> {
+    let source_text = fs::read_to_string(file_path)?;
+    analyze_code_with_semantics(&source_text, file_path, module_specifier)
+}
+
+/// Analyze code content directly (for Vite integration)
+pub fn analyze_code_with_semantics(
+    source_text: &str,
+    file_path: &Path,
+    module_specifier: Option<&str>,
+) -> Result<AnalysisResult> {
+    let allocator = Allocator::default();
+    let source_type = oxc_span::SourceType::from_path(file_path).unwrap_or_default();
+
+    // Parse the code
+    let oxc_parser::ParserReturn {
+        program, errors, ..
+    } = oxc_parser::Parser::new(&allocator, source_text, source_type).parse();
+
+    if !errors.is_empty() {
+        eprintln!("Parser errors in {}: {:?}", file_path.display(), errors);
     }
 
-    println!("❌ No imports found from target package");
-    false
+    // Build semantic information
+    let semantic_ret = oxc_semantic::SemanticBuilder::new().build(&program);
+
+    if !semantic_ret.errors.is_empty() {
+        eprintln!(
+            "Semantic errors in {}: {:?}",
+            file_path.display(),
+            semantic_ret.errors
+        );
+    }
+
+    let semantic = semantic_ret.semantic;
+
+    // Build import symbol table with optional module filtering
+    let import_symbols = build_import_symbol_table(&semantic, module_specifier);
+
+    // Find JSX elements that use imported components
+    let jsx_elements = extract_jsx_elements(&semantic, &import_symbols);
+
+    // Check if any imported components call isComponentPresent()
+    let component_checks = analyze_imported_components(&import_symbols, file_path)?;
+
+    // Check if any of the requested components are present in current JSX tree with recursive analysis
+    let has_description = check_component_presence_with_recursive_analysis(
+        &jsx_elements,
+        &component_checks,
+        file_path,
+    )?;
+
+    // Find and prepare transformations for isComponentPresent() calls
+    let transformations = find_and_prepare_transformations(&semantic, has_description);
+
+    println!("📊 Analysis result: {}", has_description);
+
+    Ok(AnalysisResult {
+        has_description,
+        file_path: file_path.to_string_lossy().to_string(),
+        dependencies: Vec::new(),
+        transformations,
+    })
 }
 
-/// Finds JSX components within parent components using semantic analysis.
-fn find_component_within_parent_semantic(
+/// Build a symbol table of all imports using semantic analysis
+fn build_import_symbol_table(
     semantic: &Semantic,
-    parent_component: &str,
-    child_component: &str,
-) -> DetailedAnalysisResult {
-    let mut found_directly = false;
-    let mut candidate_components = Vec::new();
-    let mut in_parent_component = false;
-    let mut nesting_level = 0;
+    module_specifier: Option<&str>,
+) -> HashMap<String, ImportSymbol> {
+    let mut symbols = HashMap::new();
 
-    println!(
-        "🔍 Looking for '{}' inside '{}'",
-        child_component, parent_component
-    );
+    println!("🔍 Building import symbol table...");
 
-    // Walk through all AST nodes using correct iterator
     for node in semantic.nodes().iter() {
-        match node.kind() {
-            AstKind::JSXElement(jsx_element) => {
-                if let Some(element_name) = extract_jsx_element_name(jsx_element) {
-                    println!("🏷️  Found JSX element: '{}'", element_name);
+        if let AstKind::ImportDeclaration(import_decl) = node.kind() {
+            let module_source = import_decl.source.value.to_string();
+            println!("📦 Processing import from: '{}'", module_source);
 
-                    // Check if this is the parent component
-                    if element_name == parent_component {
-                        println!("📦 Entering parent component: {}", parent_component);
-                        in_parent_component = true;
-                        nesting_level += 1;
-                    }
-                    // Check if we're inside a parent component and found the child
-                    else if in_parent_component && element_name.contains(child_component) {
-                        println!("🎯 Found child component '{}' inside parent!", element_name);
-                        found_directly = true;
-                    }
-                    // Collect other components inside parent for indirect analysis
-                    else if in_parent_component && nesting_level > 0 {
-                        // Don't include nested parent components or obvious child components
-                        if !element_name.starts_with(
-                            &parent_component.split('.').next().unwrap_or("").to_string(),
-                        ) {
-                            println!("📋 Adding candidate component: {}", element_name);
-                            candidate_components.push(CandidateComponent {
-                                component_name: element_name,
-                                import_source: None,
-                                resolved_path: None,
-                                provides_description: false,
-                            });
+            if let Some(specifiers) = &import_decl.specifiers {
+                for specifier in specifiers {
+                    match specifier {
+                        oxc_ast::ast::ImportDeclarationSpecifier::ImportSpecifier(spec) => {
+                            let local_name = spec.local.name.to_string();
+                            let imported_name = spec.imported.name().to_string();
+
+                            if let Some(module_specifier) = module_specifier {
+                                if !module_source.contains(module_specifier) {
+                                    continue;
+                                }
+                            }
+
+                            symbols.insert(
+                                local_name.clone(),
+                                ImportSymbol {
+                                    local_name: local_name.clone(),
+                                    imported_name,
+                                    module_source: module_source.clone(),
+                                },
+                            );
+
+                            println!(
+                                "   ✅ Named import: {} (local: {})",
+                                spec.imported.name(),
+                                local_name
+                            );
+                        }
+                        oxc_ast::ast::ImportDeclarationSpecifier::ImportDefaultSpecifier(spec) => {
+                            let local_name = spec.local.name.to_string();
+
+                            if let Some(module_specifier) = module_specifier {
+                                if !module_source.contains(module_specifier) {
+                                    continue;
+                                }
+                            }
+
+                            symbols.insert(
+                                local_name.clone(),
+                                ImportSymbol {
+                                    local_name: local_name.clone(),
+                                    imported_name: "default".to_string(),
+                                    module_source: module_source.clone(),
+                                },
+                            );
+
+                            println!("   ✅ Default import: {}", local_name);
+                        }
+                        oxc_ast::ast::ImportDeclarationSpecifier::ImportNamespaceSpecifier(
+                            spec,
+                        ) => {
+                            let local_name = spec.local.name.to_string();
+
+                            if let Some(module_specifier) = module_specifier {
+                                if !module_source.contains(module_specifier) {
+                                    continue;
+                                }
+                            }
+
+                            symbols.insert(
+                                local_name.clone(),
+                                ImportSymbol {
+                                    local_name: local_name.clone(),
+                                    imported_name: "*".to_string(),
+                                    module_source: module_source.clone(),
+                                },
+                            );
+
+                            println!("   ✅ Namespace import: {}", local_name);
                         }
                     }
                 }
             }
-            _ => {}
         }
     }
 
-    println!(
-        "📊 Analysis complete - found directly: {}, candidates: {}",
-        found_directly,
-        candidate_components.len()
-    );
-
-    DetailedAnalysisResult {
-        has_description: found_directly,
-        candidate_components,
-    }
+    symbols
 }
 
-/// Extract JSX element name from JSX element node
-fn extract_jsx_element_name(jsx_element: &JSXElement) -> Option<String> {
+/// Extract all JSX element names from the semantic tree
+fn extract_jsx_elements(
+    semantic: &Semantic,
+    import_symbols: &HashMap<String, ImportSymbol>,
+) -> Vec<String> {
+    let mut elements = Vec::new();
+
+    println!("🔍 Extracting JSX elements...");
+
+    for node in semantic.nodes().iter() {
+        if let AstKind::JSXElement(jsx_element) = node.kind() {
+            if let Some(element_name) = extract_jsx_element_name(jsx_element, import_symbols) {
+                println!("🏷️  Found JSX element: '{}'", element_name);
+                elements.push(element_name);
+            }
+        }
+    }
+
+    elements
+}
+
+/// Extract JSX element name with proper semantic resolution
+fn extract_jsx_element_name(
+    jsx_element: &JSXElement,
+    import_symbols: &HashMap<String, ImportSymbol>,
+) -> Option<String> {
     match &jsx_element.opening_element.name {
-        oxc_ast::ast::JSXElementName::Identifier(identifier) => Some(identifier.name.to_string()),
+        oxc_ast::ast::JSXElementName::Identifier(identifier) => {
+            let name = identifier.name.to_string();
+
+            // Check if this identifier is an imported symbol
+            if let Some(symbol) = import_symbols.get(&name) {
+                Some(format!("{} (from {})", name, symbol.module_source))
+            } else {
+                Some(name)
+            }
+        }
         oxc_ast::ast::JSXElementName::IdentifierReference(identifier) => {
             Some(identifier.name.to_string())
         }
         oxc_ast::ast::JSXElementName::MemberExpression(member_expr) => {
-            // Handle member expressions like Checkbox.Description
-            let object_name = extract_jsx_member_object_name(&member_expr.object)?;
+            // Handle member expressions like DummyComp.Description
+            let object_name = extract_jsx_member_object_name(&member_expr.object, import_symbols)?;
             let property_name = &member_expr.property.name;
             Some(format!("{}.{}", object_name, property_name))
         }
         oxc_ast::ast::JSXElementName::NamespacedName(namespaced) => {
             Some(format!("{}:{}", namespaced.namespace.name, namespaced.name))
         }
-        oxc_ast::ast::JSXElementName::ThisExpression(_) => {
-            // Skip 'this' expressions as they're not standard component names
-            None
-        }
+        oxc_ast::ast::JSXElementName::ThisExpression(_) => None,
     }
 }
 
-/// Extract object name from JSX member expression object
+/// Extract object name from JSX member expression with semantic resolution
 fn extract_jsx_member_object_name(
     object: &oxc_ast::ast::JSXMemberExpressionObject,
+    import_symbols: &HashMap<String, ImportSymbol>,
 ) -> Option<String> {
     match object {
         oxc_ast::ast::JSXMemberExpressionObject::IdentifierReference(identifier) => {
-            Some(identifier.name.to_string())
+            let name = identifier.name.to_string();
+
+            // Return the local alias name as used in JSX
+            if let Some(_symbol) = import_symbols.get(&name) {
+                Some(name)
+            } else {
+                Some(name)
+            }
         }
         oxc_ast::ast::JSXMemberExpressionObject::MemberExpression(member_expr) => {
-            let object_name = extract_jsx_member_object_name(&member_expr.object)?;
+            let object_name = extract_jsx_member_object_name(&member_expr.object, import_symbols)?;
             let property_name = &member_expr.property.name;
             Some(format!("{}.{}", object_name, property_name))
         }
-        oxc_ast::ast::JSXMemberExpressionObject::ThisExpression(_) => {
-            // Skip 'this' expressions as they're not standard component names
-            None
-        }
+        oxc_ast::ast::JSXMemberExpressionObject::ThisExpression(_) => None,
     }
 }
 
-/// Analyze a file with proper semantic analysis
-pub fn analyze_file_with_semantics(file_path: &Path) -> Result<AnalysisResult> {
+/// Analyze imported components to see if they call isComponentPresent()
+fn analyze_imported_components(
+    import_symbols: &HashMap<String, ImportSymbol>,
+    current_file: &Path,
+) -> Result<Vec<ComponentWithCheck>> {
+    let mut component_checks = Vec::new();
+
+    println!("🔍 Analyzing imported components for isComponentPresent() calls...");
+
+    for (local_name, symbol) in import_symbols {
+        // Skip non-relative imports for now (e.g., '@builder.io/qwik')
+        if !symbol.module_source.starts_with('.') {
+            continue;
+        }
+
+        // Resolve the import path
+        match resolve_import_path(&symbol.module_source, current_file) {
+            Ok(resolved_path) => {
+                println!("📂 Analyzing component file: {}", resolved_path);
+
+                // Analyze the component file for isComponentPresent() calls
+                if let Ok(checks) = find_component_checks_in_file(&resolved_path) {
+                    for check in checks {
+                        // Map the component check to the local name used in current file
+                        let component_name = format!("{}.{}", local_name, check.component_name);
+                        let checks_for = check.checks_for.clone();
+
+                        component_checks.push(ComponentWithCheck {
+                            component_name: component_name.clone(),
+                            checks_for: checks_for.clone(),
+                        });
+
+                        println!(
+                            "✅ Component '{}' checks for '{}'",
+                            component_name, checks_for
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                println!(
+                    "⚠️ Could not resolve import '{}': {}",
+                    symbol.module_source, e
+                );
+            }
+        }
+    }
+
+    Ok(component_checks)
+}
+
+/// Find isComponentPresent() calls in a specific file
+fn find_component_checks_in_file(file_path: &str) -> Result<Vec<ComponentWithCheck>> {
     let source_text = fs::read_to_string(file_path)?;
     let allocator = Allocator::default();
-    let source_type = oxc_span::SourceType::from_path(file_path).unwrap_or_default();
+    let source_type = oxc_span::SourceType::from_path(Path::new(file_path)).unwrap_or_default();
 
     // Parse the file
     let oxc_parser::ParserReturn {
@@ -157,223 +328,219 @@ pub fn analyze_file_with_semantics(file_path: &Path) -> Result<AnalysisResult> {
     } = oxc_parser::Parser::new(&allocator, &source_text, source_type).parse();
 
     if !errors.is_empty() {
-        eprintln!("Parser errors in {}: {:?}", file_path.display(), errors);
+        return Ok(Vec::new());
     }
 
     // Build semantic information
     let semantic_ret = oxc_semantic::SemanticBuilder::new().build(&program);
-
-    if !semantic_ret.errors.is_empty() {
-        eprintln!(
-            "Semantic errors in {}: {:?}",
-            file_path.display(),
-            semantic_ret.errors
-        );
-    }
-
     let semantic = semantic_ret.semantic;
 
-    // Check for imports from target package
-    if !check_imports_from_package_semantic(&semantic, "@kunai-consulting/qwik") {
-        return Ok(AnalysisResult {
-            has_description: false,
-            file_path: file_path.to_string_lossy().to_string(),
-            dependencies: Vec::new(),
-        });
-    }
+    let mut checks = Vec::new();
 
-    // Look for Checkbox.Description within Checkbox.Root
-    let mut result =
-        find_component_within_parent_semantic(&semantic, "Checkbox.Root", "Description");
-
-    // If not found directly, perform indirect analysis
-    if !result.has_description && !result.candidate_components.is_empty() {
-        println!("🔄 Starting indirect analysis...");
-
-        // Resolve import sources for candidate components
-        resolve_import_sources_semantic(&semantic, &mut result.candidate_components);
-
-        // Recursively analyze candidate components
-        if find_indirect_components(&mut result.candidate_components, file_path)? {
-            result.has_description = true;
-            println!("✅ Found Checkbox.Description through indirect analysis!");
-        }
-    }
-
-    Ok(AnalysisResult {
-        has_description: result.has_description,
-        file_path: file_path.to_string_lossy().to_string(),
-        dependencies: Vec::new(), // TODO: Extract actual dependencies
-    })
-}
-
-/// Resolve import sources for candidate components using semantic analysis
-pub fn resolve_import_sources_semantic(
-    semantic: &Semantic,
-    candidate_components: &mut [CandidateComponent],
-) {
-    println!(
-        "🔍 Resolving import sources for {} candidates",
-        candidate_components.len()
-    );
-
-    // Walk through all nodes to find import declarations
+    // First, try to find isComponentPresent calls directly in this file
     for node in semantic.nodes().iter() {
-        if let AstKind::ImportDeclaration(import_decl) = node.kind() {
-            let import_source = import_decl.source.value.to_string();
-            println!("📦 Processing import from: '{}'", import_source);
-
-            // Check each import specifier
-            if let Some(specifiers) = &import_decl.specifiers {
-                for specifier in specifiers {
-                    match specifier {
-                        oxc_ast::ast::ImportDeclarationSpecifier::ImportSpecifier(spec) => {
-                            let imported_name = spec.local.name.to_string();
-                            println!("   - Named import: '{}'", imported_name);
-
-                            // Find matching candidate component
-                            for candidate in candidate_components.iter_mut() {
-                                if candidate.component_name == imported_name {
-                                    println!(
-                                        "✅ Matched '{}' to import source '{}'",
-                                        imported_name, import_source
-                                    );
-                                    candidate.import_source = Some(import_source.clone());
-                                }
-                            }
-                        }
-                        oxc_ast::ast::ImportDeclarationSpecifier::ImportDefaultSpecifier(spec) => {
-                            let imported_name = spec.local.name.to_string();
-                            println!("   - Default import: '{}'", imported_name);
-
-                            // Find matching candidate component
-                            for candidate in candidate_components.iter_mut() {
-                                if candidate.component_name == imported_name {
-                                    println!(
-                                        "✅ Matched '{}' to import source '{}'",
-                                        imported_name, import_source
-                                    );
-                                    candidate.import_source = Some(import_source.clone());
-                                }
-                            }
-                        }
-                        oxc_ast::ast::ImportDeclarationSpecifier::ImportNamespaceSpecifier(
-                            spec,
-                        ) => {
-                            let imported_name = spec.local.name.to_string();
-                            println!("   - Namespace import: '{}'", imported_name);
-
-                            // Find matching candidate component
-                            for candidate in candidate_components.iter_mut() {
-                                if candidate
-                                    .component_name
-                                    .starts_with(&format!("{}.", imported_name))
-                                {
-                                    println!(
-                                        "✅ Matched '{}' to import source '{}'",
-                                        candidate.component_name, import_source
-                                    );
-                                    candidate.import_source = Some(import_source.clone());
-                                }
-                            }
-                        }
+        if let AstKind::CallExpression(call_expr) = node.kind() {
+            if let Some(function_name) = extract_function_name(call_expr) {
+                if function_name == "isComponentPresent" {
+                    if let Some(component_name) = extract_component_argument(call_expr) {
+                        checks.push(ComponentWithCheck {
+                            component_name: "Root".to_string(), // Assume it's in Root for now
+                            checks_for: component_name,
+                        });
                     }
                 }
             }
         }
     }
 
-    // Log results
-    for candidate in candidate_components.iter() {
-        if let Some(import_source) = &candidate.import_source {
-            println!(
-                "📋 Candidate '{}' resolved to '{}'",
-                candidate.component_name, import_source
-            );
-        } else {
-            println!(
-                "⚠️  Candidate '{}' could not be resolved",
-                candidate.component_name
-            );
-        }
-    }
-}
+    // If no direct calls found, check if this is an index file that exports other components
+    if checks.is_empty() {
+        println!("🔍 No direct isComponentPresent calls found, checking exports...");
 
-/// Recursively find components that provide descriptions
-pub fn find_indirect_components(
-    candidate_components: &mut [CandidateComponent],
-    importer: &Path,
-) -> Result<bool> {
-    let mut found_description = false;
+        // Look for imports and exports that might point to actual component files
+        for node in semantic.nodes().iter() {
+            if let AstKind::ImportDeclaration(import_decl) = node.kind() {
+                let import_source = import_decl.source.value.to_string();
 
-    for candidate in candidate_components.iter_mut() {
-        if let Some(import_source) = &candidate.import_source {
-            println!(
-                "🔍 Analyzing candidate '{}' from '{}'",
-                candidate.component_name, import_source
-            );
-
-            // Resolve the import path
-            match resolve_import_path(import_source, importer) {
-                Ok(resolved_path) => {
-                    candidate.resolved_path = Some(resolved_path.clone());
-                    println!("📂 Resolved to: {}", resolved_path);
-
-                    // Analyze the resolved component file
-                    match analyze_component_for_description(Path::new(&resolved_path)) {
-                        Ok(provides_description) => {
-                            candidate.provides_description = provides_description;
-                            if provides_description {
-                                println!(
-                                    "✅ Component '{}' provides description!",
-                                    candidate.component_name
-                                );
-                                found_description = true;
-                            } else {
-                                println!(
-                                    "❌ Component '{}' does not provide description",
-                                    candidate.component_name
-                                );
-                            }
-                        }
-                        Err(e) => {
-                            println!(
-                                "⚠️  Could not analyze component '{}': {}",
-                                candidate.component_name, e
-                            );
-                        }
-                    }
-                }
-                Err(e) => {
+                // Check if this import might be for a component that calls isComponentPresent
+                if import_source.starts_with('.')
+                    && (import_source.contains("root") || import_source.contains("Root"))
+                {
                     println!(
-                        "⚠️  Could not resolve import path for '{}': {}",
-                        candidate.component_name, e
+                        "📂 Found potential Root component import: {}",
+                        import_source
                     );
+
+                    // Resolve and analyze the Root component file
+                    if let Ok(resolved_path) =
+                        resolve_import_path(&import_source, Path::new(file_path))
+                    {
+                        println!("📂 Analyzing Root component file: {}", resolved_path);
+
+                        if let Ok(root_checks) = find_component_checks_in_file(&resolved_path) {
+                            checks.extend(root_checks);
+                        }
+                    }
                 }
             }
-        } else {
-            println!(
-                "⚠️  Candidate '{}' has no import source",
-                candidate.component_name
-            );
         }
     }
 
-    Ok(found_description)
+    Ok(checks)
 }
 
-/// Analyze a component file to see if it contains Checkbox.Description
-fn analyze_component_for_description(file_path: &Path) -> Result<bool> {
-    println!("🔍 Analyzing component file: {}", file_path.display());
+/// Extract function name from call expression
+fn extract_function_name(call_expr: &CallExpression) -> Option<String> {
+    match &call_expr.callee {
+        oxc_ast::ast::Expression::Identifier(identifier) => Some(identifier.name.to_string()),
+        _ => None,
+    }
+}
 
-    if !file_path.exists() {
-        println!("❌ File does not exist: {}", file_path.display());
+/// Extract component argument from isComponentPresent() call
+fn extract_component_argument(call_expr: &CallExpression) -> Option<String> {
+    if let Some(first_arg) = call_expr.arguments.first() {
+        match &first_arg {
+            oxc_ast::ast::Argument::Identifier(identifier) => Some(identifier.name.to_string()),
+            _ => None,
+        }
+    } else {
+        None
+    }
+}
+
+/// Check if requested components are present with recursive subtree analysis
+fn check_component_presence_with_recursive_analysis(
+    jsx_elements: &[String],
+    component_checks: &[ComponentWithCheck],
+    current_file: &Path,
+) -> Result<bool> {
+    if component_checks.is_empty() {
+        println!("❌ No imported components with isComponentPresent() calls found");
         return Ok(false);
     }
 
+    println!("🔍 Checking component presence with recursive analysis...");
+
+    for check in component_checks {
+        println!(
+            "🎯 Component '{}' checks for '{}'",
+            check.component_name, check.checks_for
+        );
+
+        // Check if the component that makes the check is used in JSX
+        let component_used = jsx_elements
+            .iter()
+            .any(|element| element.contains(&check.component_name));
+
+        if component_used {
+            println!("✅ Found component '{}' being used", check.component_name);
+
+            // First check if target component is directly in current JSX tree
+            let direct_found = jsx_elements.iter().any(|element| {
+                element.contains(&check.checks_for)
+                    || element.contains(&format!(".{}", check.checks_for))
+            });
+
+            if direct_found {
+                println!(
+                    "✅ Found target component '{}' directly in JSX tree!",
+                    check.checks_for
+                );
+                return Ok(true);
+            }
+
+            // If not found directly, recursively check imported components within the Root subtree
+            println!("🔍 Recursively analyzing components within Root subtree...");
+
+            if recursively_check_jsx_subtree(jsx_elements, &check.checks_for, current_file)? {
+                println!(
+                    "✅ Found target component '{}' in recursive JSX analysis!",
+                    check.checks_for
+                );
+                return Ok(true);
+            }
+
+            println!(
+                "❌ Target component '{}' not found in JSX tree or subtrees",
+                check.checks_for
+            );
+        } else {
+            println!(
+                "❌ Component '{}' not used in this JSX tree",
+                check.component_name
+            );
+        }
+    }
+
+    Ok(false)
+}
+
+/// Recursively analyze JSX subtree by following component imports
+fn recursively_check_jsx_subtree(
+    jsx_elements: &[String],
+    target_component: &str,
+    current_file: &Path,
+) -> Result<bool> {
+    // Extract component names that are not part of the target module (like "Heyo")
+    for element in jsx_elements {
+        // Skip elements that contain dots (they're likely from the target module)
+        if element.contains('.') {
+            continue;
+        }
+
+        // Skip basic HTML elements
+        if element.starts_with(char::is_lowercase) {
+            continue;
+        }
+
+        println!("🔍 Recursively analyzing component: {}", element);
+
+        // Try to find and analyze this component file
+        if let Ok(component_file) = find_component_file(element, current_file) {
+            println!("📂 Found component file: {}", component_file);
+
+            // Analyze the component file recursively
+            if let Ok(has_target) = analyze_component_for_target(&component_file, target_component)
+            {
+                if has_target {
+                    return Ok(true);
+                }
+            }
+        }
+    }
+
+    Ok(false)
+}
+
+/// Find the file for a given component name
+fn find_component_file(component_name: &str, current_file: &Path) -> Result<String> {
+    let current_dir = current_file
+        .parent()
+        .ok_or("Could not get parent directory")?;
+    let component_file_name = component_name.to_lowercase();
+
+    // Try common component file patterns
+    for pattern in &[
+        format!("./{}.tsx", component_file_name),
+        format!("./{}.ts", component_file_name),
+        format!("./{}.jsx", component_file_name),
+        format!("./{}.js", component_file_name),
+    ] {
+        let resolved_path = current_dir.join(pattern);
+        if resolved_path.exists() {
+            return Ok(resolved_path.to_string_lossy().to_string());
+        }
+    }
+
+    Err(format!("Could not find component file for: {}", component_name).into())
+}
+
+/// Analyze a component file to see if it contains the target component
+fn analyze_component_for_target(file_path: &str, target_component: &str) -> Result<bool> {
     let source_text = fs::read_to_string(file_path)?;
     let allocator = Allocator::default();
-    let source_type = oxc_span::SourceType::from_path(file_path).unwrap_or_default();
+    let source_type = oxc_span::SourceType::from_path(Path::new(file_path)).unwrap_or_default();
 
     // Parse the file
     let oxc_parser::ParserReturn {
@@ -381,33 +548,31 @@ fn analyze_component_for_description(file_path: &Path) -> Result<bool> {
     } = oxc_parser::Parser::new(&allocator, &source_text, source_type).parse();
 
     if !errors.is_empty() {
-        eprintln!("Parser errors in {}: {:?}", file_path.display(), errors);
         return Ok(false);
     }
 
     // Build semantic information
     let semantic_ret = oxc_semantic::SemanticBuilder::new().build(&program);
-
-    if !semantic_ret.errors.is_empty() {
-        eprintln!(
-            "Semantic errors in {}: {:?}",
-            file_path.display(),
-            semantic_ret.errors
-        );
-    }
-
     let semantic = semantic_ret.semantic;
 
-    // Check if this component contains Checkbox.Description anywhere
-    let contains_description = contains_checkbox_description_anywhere(&semantic);
+    // Build import symbol table (no filtering for recursive analysis)
+    let import_symbols = build_import_symbol_table(&semantic, None);
 
-    println!(
-        "📊 File {} contains Checkbox.Description: {}",
-        file_path.display(),
-        contains_description
-    );
+    // Extract JSX elements and check for target
+    let jsx_elements = extract_jsx_elements(&semantic, &import_symbols);
 
-    Ok(contains_description)
+    for element in jsx_elements {
+        if element.contains(target_component) || element.contains(&format!(".{}", target_component))
+        {
+            println!(
+                "✅ Found target '{}' in component file: {}",
+                target_component, file_path
+            );
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
 }
 
 /// Resolve import path relative to importer
@@ -418,8 +583,8 @@ fn resolve_import_path(import_source: &str, importer: &Path) -> Result<String> {
         // Relative import
         importer_dir.join(import_source)
     } else {
-        // Absolute or node_modules import - for now, just return as-is
-        return Ok(import_source.to_string());
+        // Absolute or node_modules import
+        return Err("Non-relative imports not supported".into());
     };
 
     // Try different extensions
@@ -436,20 +601,63 @@ fn resolve_import_path(import_source: &str, importer: &Path) -> Result<String> {
         }
     }
 
-    // If not found, return the resolved path anyway
-    Ok(resolved.to_string_lossy().to_string())
+    // If not found, return error
+    Err(format!("Could not resolve import: {}", import_source).into())
 }
 
-/// Check if semantic analysis contains Checkbox.Description anywhere
-pub fn contains_checkbox_description_anywhere(semantic: &Semantic) -> bool {
+/// Find isComponentPresent() calls and prepare transformations
+fn find_and_prepare_transformations(
+    semantic: &Semantic,
+    has_description: bool,
+) -> Vec<Transformation> {
+    let mut transformations = Vec::new();
+    let source_text = semantic.source_text();
+
     for node in semantic.nodes().iter() {
-        if let AstKind::JSXElement(jsx_element) = node.kind() {
-            if let Some(element_name) = extract_jsx_element_name(jsx_element) {
-                if element_name == "Checkbox.Description" {
-                    return true;
+        if let AstKind::CallExpression(call_expr) = node.kind() {
+            if let Some(function_name) = extract_function_name(call_expr) {
+                if function_name == "isComponentPresent" {
+                    // Only transform if this is a proper function call (not part of import/export)
+                    // Check if the call has arguments and is in a valid context
+                    if !call_expr.arguments.is_empty() {
+                        // Get the span of the call expression
+                        let span = call_expr.span;
+                        let start = span.start as u32;
+                        let end = span.end as u32;
+                        let replacement = if has_description { "true" } else { "false" };
+
+                        // Extract the actual source text for debugging
+                        let actual_text = if (start as usize) < source_text.len()
+                            && (end as usize) <= source_text.len()
+                        {
+                            &source_text[(start as usize)..(end as usize)]
+                        } else {
+                            "INVALID_SPAN"
+                        };
+
+                        println!(
+                            "🔄 Preparing transformation: {}..{} -> {} (call: {})",
+                            start, end, replacement, function_name
+                        );
+                        println!("📝 Actual source text at span: '{}'", actual_text);
+
+                        // Show context around the span for debugging
+                        let context_start = if start >= 20 { start - 20 } else { 0 };
+                        let context_end = std::cmp::min(end + 20, source_text.len() as u32);
+                        let context =
+                            &source_text[(context_start as usize)..(context_end as usize)];
+                        println!("📖 Context: '{}'", context);
+
+                        transformations.push(Transformation {
+                            start,
+                            end,
+                            replacement: replacement.to_string(),
+                        });
+                    }
                 }
             }
         }
     }
-    false
+
+    transformations
 }
