@@ -3,7 +3,7 @@ use oxc_ast::AstKind;
 use oxc_parser;
 use oxc_resolver::{ResolveOptions, Resolver};
 use oxc_semantic::Semantic;
-use oxc_span::SourceType;
+use oxc_span::{SourceType, VALID_EXTENSIONS};
 use std::fs;
 use std::path::Path;
 
@@ -51,7 +51,10 @@ pub fn find_import_source_for_component(
 
 pub fn resolve_import_path(import_source: &str, current_file: &Path) -> Result<String> {
     let options = ResolveOptions {
-        extensions: vec![".tsx".into(), ".ts".into(), ".jsx".into(), ".js".into()],
+        extensions: VALID_EXTENSIONS
+            .iter()
+            .map(|ext| format!(".{}", ext).into())
+            .collect(),
         ..Default::default()
     };
 
@@ -88,8 +91,8 @@ pub fn find_component_file_in_module(module_dir: &str, component_name: &str) -> 
 
     let component_file_name = component_name.to_lowercase();
 
-    for ext in &[".tsx", ".ts", ".jsx", ".js"] {
-        let component_file = actual_module_dir.join(format!("{}{}", component_file_name, ext));
+    for ext in VALID_EXTENSIONS {
+        let component_file = actual_module_dir.join(format!("{}.{}", component_file_name, ext));
         if component_file.exists() {
             debug(&format!(
                 "📂 Found component file: {}",
@@ -108,10 +111,9 @@ pub fn find_component_file_in_module(module_dir: &str, component_name: &str) -> 
 }
 
 fn is_index_file(path: &str) -> bool {
-    path.ends_with("index.ts")
-        || path.ends_with("index.tsx")
-        || path.ends_with("index.js")
-        || path.ends_with("index.jsx")
+    VALID_EXTENSIONS
+        .iter()
+        .any(|ext| path.ends_with(&format!("index.{}", ext)))
 }
 
 pub fn find_calls_in_file(file_path: &str) -> Result<Vec<ComponentPresenceCall>> {
