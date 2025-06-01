@@ -27,7 +27,6 @@ use oxc_span::SourceType;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-/// Parse a TypeScript/JavaScript file and return semantic information
 pub fn parse_file_with_semantic(source_text: &str, file_path: &Path) -> Result<()> {
     let allocator = Allocator::default();
     let source_type = SourceType::from_path(file_path).unwrap_or_default();
@@ -55,14 +54,12 @@ pub fn parse_file_with_semantic(source_text: &str, file_path: &Path) -> Result<(
 
 #[napi]
 pub fn analyze_file(file_path: String) -> napi::Result<AnalysisResult> {
-    let path = Path::new(&file_path);
-    match component_analyzer::analyze_file_with_semantics(path) {
-        Ok(result) => Ok(result),
-        Err(e) => Err(napi::Error::new(
+    component_analyzer::analyze_file_with_semantics(Path::new(&file_path)).map_err(|e| {
+        napi::Error::new(
             napi::Status::GenericFailure,
             format!("Analysis failed: {}", e),
-        )),
-    }
+        )
+    })
 }
 
 #[napi]
@@ -72,19 +69,15 @@ pub fn analyze_file_changed(file_path: String, _event: String) {
     }
 }
 
-/// Analyze and transform code content directly (for Vite integration)
 #[napi]
 pub fn analyze_and_transform_code(code: String, file_path: String) -> napi::Result<String> {
     let path = Path::new(&file_path);
-    let result = match component_analyzer::analyze_code_with_semantics(&code, path) {
-        Ok(result) => result,
-        Err(e) => {
-            return Err(napi::Error::new(
-                napi::Status::GenericFailure,
-                format!("Analysis failed: {}", e),
-            ))
-        }
-    };
+    let result = component_analyzer::analyze_code_with_semantics(&code, path).map_err(|e| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("Analysis failed: {}", e),
+        )
+    })?;
 
     if result.transformations.is_empty() {
         return Ok(code);
