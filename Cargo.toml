@@ -16,10 +16,10 @@ oxc_syntax = "0.72.1"
 oxc_codegen = "0.72.1"
 oxc_transformer = "0.72.1"
 oxc_resolver = "11.0.0"
-napi = "2"
-napi-derive = "2"
+napi = "3.0.0-beta.3"
+napi-derive = "3.0.0-beta.3"
 phf = { version = "0.11.3", features = ["macros"] }
 
 [build-dependencies]
-napi-build = "2"
+napi-build = "2.2.0"
 
