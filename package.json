@@ -1,9 +1,20 @@
 {
   "name": "qwik-analyzer",
   "version": "0.1.0",
-  "description": "Fast Qwik component analyzer using OXC and Rust",
+  "description": "High-performance semantic JSX component analyzer built with Rust + OXC",
   "main": "index.js",
   "types": "index.d.ts",
+  "keywords": ["qwik", "jsx", "analyzer", "rust", "vite", "plugin", "semantic", "performance"],
+  "author": "Your Name",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/qwik-analyzer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/qwik-analyzer/issues"
+  },
+  "homepage": "https://github.com/yourusername/qwik-analyzer#readme",
   "napi": {
     "binaryName": "qwik-analyzer",
     "targets": [
@@ -37,7 +48,7 @@
     "build:debug": "napi build --platform && tsc",
     "build:rust": "napi build --platform --release",
     "build:ts": "tsc",
-    "prepublishOnly": "napi prepublish -t npm",
+    "prepublishOnly": "napi prepublish -t npm && pnpm build:ts",
     "test": "cargo test",
     "universal": "napi universal",
     "version": "napi version"
@@ -47,6 +58,7 @@
     "index.js",
     "index.d.ts",
     "plugin.js",
-    "plugin.d.ts"
+    "plugin.d.ts",
+    "*.node"
   ]
 }
