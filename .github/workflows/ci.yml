@@ -103,13 +103,17 @@ jobs:
           ls -la *.node
       - name: Generate NAPI wrapper
         run: pnpm build
+      - name: Copy plugin files from dist
+        run: |
+          cp dist/plugin.js .
+          cp dist/plugin.d.ts .
       - name: List all files for debugging
         run: ls -la *.js *.d.ts *.node
-      - name: Version bump
+      - name: Auto-increment version
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          pnpm version ${{ github.event.inputs.version }} --no-git-tag-version
+          npm version ${{ github.event.inputs.version }} --no-git-tag-version
       - name: Publish to npm
         run: pnpm publish --no-git-checks
         env:
