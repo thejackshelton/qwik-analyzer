@@ -113,7 +113,19 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
+          
+          # Get current version on npm to avoid conflicts
+          CURRENT_NPM_VERSION=$(npm view qwik-analyzer version 2>/dev/null || echo "0.0.0")
+          echo "Current npm version: $CURRENT_NPM_VERSION"
+          
+          # Set package.json to current npm version first
+          npm version $CURRENT_NPM_VERSION --no-git-tag-version --allow-same-version
+          
+          # Now increment from the npm version
           npm version ${{ github.event.inputs.version }} --no-git-tag-version
+          
+          NEW_VERSION=$(node -p "require('./package.json').version")
+          echo "New version will be: $NEW_VERSION"
       - name: Publish to npm
         run: pnpm publish --no-git-checks
         env:
