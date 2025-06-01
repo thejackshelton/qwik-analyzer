@@ -83,7 +83,6 @@ pub fn has_component(
         component_name
     ));
 
-    // Check direct usage first
     for node in semantic.nodes().iter() {
         let AstKind::JSXOpeningElement(jsx_opening) = node.kind() else {
             continue;

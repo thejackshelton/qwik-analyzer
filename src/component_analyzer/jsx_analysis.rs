@@ -4,6 +4,7 @@ use oxc_semantic::Semantic;
 use oxc_syntax::identifier::is_identifier_name;
 use oxc_syntax::keyword::is_reserved_keyword_or_global_object;
 use phf::phf_set;
+use std::collections::HashSet;
 
 use crate::component_analyzer::utils::debug;
 
@@ -160,7 +161,7 @@ const HTML_TAGS: phf::Set<&'static str> = phf_set![
 ];
 
 pub fn extract_imported_jsx_components(semantic: &Semantic) -> Vec<String> {
-    let mut components = Vec::new();
+    let mut components = HashSet::new();
 
     for node in semantic.nodes().iter() {
         let AstKind::JSXOpeningElement(jsx_opening) = node.kind() else {
@@ -174,22 +175,20 @@ pub fn extract_imported_jsx_components(semantic: &Semantic) -> Vec<String> {
         // namespaced / compound components
         if element_name.contains('.') {
             if let Some(full_component) = parse_member_component(&element_name) {
-                if !components.contains(&full_component) {
+                if components.insert(full_component.clone()) {
                     debug(&format!("🏷️ Found imported component: {}", full_component));
-                    components.push(full_component);
                 }
             }
             continue;
         }
 
         // direct imports
-        if is_component_name(&element_name) && !components.contains(&element_name) {
-            components.push(element_name.clone());
+        if is_component_name(&element_name) && components.insert(element_name.clone()) {
             debug(&format!("🏷️ Found imported component: {}", element_name));
         }
     }
 
-    components
+    components.into_iter().collect()
 }
 
 fn parse_member_component(element_name: &str) -> Option<String> {

@@ -22,26 +22,21 @@ pub fn find_import_source_for_component(
             continue;
         };
 
-        let module_source = import_decl.source.value.to_string();
         let Some(specifiers) = &import_decl.specifiers else {
             continue;
         };
 
-        for spec in specifiers {
-            let local_name = match spec {
-                oxc_ast::ast::ImportDeclarationSpecifier::ImportSpecifier(spec) => {
-                    spec.local.name.to_string()
-                }
-                oxc_ast::ast::ImportDeclarationSpecifier::ImportDefaultSpecifier(spec) => {
-                    spec.local.name.to_string()
-                }
-                oxc_ast::ast::ImportDeclarationSpecifier::ImportNamespaceSpecifier(spec) => {
-                    spec.local.name.to_string()
-                }
+        for specifier in specifiers {
+            let Some(specifier_name) = get_specifier_name(specifier) else {
+                continue;
             };
 
-            if local_name == component_name {
-                return Some(module_source);
+            if specifier_name == component_name {
+                debug(&format!(
+                    "📥 Found import for {}: {}",
+                    component_name, import_decl.source.value
+                ));
+                return Some(import_decl.source.value.to_string());
             }
         }
     }
@@ -205,4 +200,18 @@ pub fn file_has_component(file_path: &str, target_component: &str) -> Result<boo
     }
 
     Ok(false)
+}
+
+fn get_specifier_name<'a>(
+    specifier: &'a oxc_ast::ast::ImportDeclarationSpecifier,
+) -> Option<&'a str> {
+    match specifier {
+        oxc_ast::ast::ImportDeclarationSpecifier::ImportSpecifier(spec) => Some(&spec.local.name),
+        oxc_ast::ast::ImportDeclarationSpecifier::ImportDefaultSpecifier(spec) => {
+            Some(&spec.local.name)
+        }
+        oxc_ast::ast::ImportDeclarationSpecifier::ImportNamespaceSpecifier(spec) => {
+            Some(&spec.local.name)
+        }
+    }
 }
