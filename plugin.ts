@@ -1,16 +1,15 @@
 import type { PluginOption } from "vite";
 
-// Declare the NAPI functions that exist in ../index.js
-declare function analyzeAndTransformCode(code: string, filePath: string, moduleSpecifier?: string): Promise<string>;
-declare function analyzeFileChanged(filePath: string, event: string, moduleSpecifier?: string): void;
-
 interface QwikAnalyzerOptions {
   debug?: boolean;
-  moduleSpecifier?: string;
+}
+
+interface NAPIModule {
+  analyzeAndTransformCode: (code: string, filePath: string) => string;
+  analyzeFileChanged: (filePath: string, event: string) => void;
 }
 
 let isDebugMode = false;
-let moduleSpecifier: string | undefined;
 
 export function debug(message: string): void {
   if (isDebugMode) {
@@ -20,10 +19,10 @@ export function debug(message: string): void {
 
 // Lazy loader for NAPI functions to avoid esbuild .node file issues during config loading
 class NAPIWrapper {
-  private _module: any = null;
-  private _loading: Promise<any> | null = null;
+  private _module: NAPIModule | null = null;
+  private _loading: Promise<NAPIModule> | null = null;
 
-  async getModule() {
+  async getModule(): Promise<NAPIModule> {
     if (this._module) {
       return this._module;
     }
@@ -37,9 +36,9 @@ class NAPIWrapper {
     return this._module;
   }
 
-  private async loadModule() {
+  private async loadModule(): Promise<NAPIModule> {
     try {
-      // Use eval to avoid static analysis by bundlers
+      // Use dynamic import to avoid static analysis by bundlers
       const importFn = new Function('specifier', 'return import(specifier)');
       const napiModule = await importFn('../index.js');
       debug('NAPI module loaded successfully');
@@ -50,7 +49,7 @@ class NAPIWrapper {
     }
   }
 
-  async analyzeAndTransformCode(code: string, filePath: string, moduleSpecifier?: string): Promise<string> {
+  async analyzeAndTransformCode(code: string, filePath: string): Promise<string> {
     const module = await this.getModule();
     debug(`NAPI module available functions: ${Object.keys(module).join(', ')}`);
     
@@ -60,12 +59,12 @@ class NAPIWrapper {
     }
     
     debug(`Calling analyzeAndTransformCode with file: ${filePath}`);
-    return module.analyzeAndTransformCode(code, filePath, moduleSpecifier);
+    return module.analyzeAndTransformCode(code, filePath);
   }
 
-  async analyzeFileChanged(filePath: string, event: string, moduleSpecifier?: string): Promise<void> {
+  async analyzeFileChanged(filePath: string, event: string): Promise<void> {
     const module = await this.getModule();
-    return module.analyzeFileChanged(filePath, event, moduleSpecifier);
+    return module.analyzeFileChanged(filePath, event);
   }
 }
 
@@ -73,11 +72,6 @@ const napiWrapper = new NAPIWrapper();
 
 export default function qwikAnalyzer(options: QwikAnalyzerOptions = {}): PluginOption {
   isDebugMode = options.debug ?? false;
-  moduleSpecifier = options.moduleSpecifier;
-  
-  if (moduleSpecifier) {
-    debug(`Using module specifier filter: ${moduleSpecifier}`);
-  }
 
   return {
     name: "qwik-analyzer",
@@ -99,7 +93,7 @@ export default function qwikAnalyzer(options: QwikAnalyzerOptions = {}): PluginO
 
       try {
         // Pass code content to Rust, get transformed code back
-        const transformedCode = await napiWrapper.analyzeAndTransformCode(code, cleanedId, moduleSpecifier);
+        const transformedCode = await napiWrapper.analyzeAndTransformCode(code, cleanedId);
         
         // Only return if code was actually transformed
         if (transformedCode !== code) {
@@ -124,7 +118,7 @@ export default function qwikAnalyzer(options: QwikAnalyzerOptions = {}): PluginO
       debug(`File update: ${file}`);
 
       try {
-        await napiWrapper.analyzeFileChanged(file, change.event, moduleSpecifier);
+        await napiWrapper.analyzeFileChanged(file, change.event);
       } catch (error) {
         debug(`Error processing file change: ${error}`);
       }

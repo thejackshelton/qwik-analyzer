@@ -103,12 +103,8 @@ jobs:
           ls -la *.node
       - name: Generate NAPI wrapper
         run: pnpm build
-      - name: Copy plugin files from dist
-        run: |
-          cp dist/plugin.js .
-          cp dist/plugin.d.ts .
       - name: List all files for debugging
-        run: ls -la *.js *.d.ts *.node
+        run: ls -la *.js *.d.ts *.node && ls -la dist/
       - name: Auto-increment version
         run: |
           git config --local user.email "action@github.com"

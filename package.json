@@ -2,12 +2,12 @@
   "name": "qwik-analyzer",
   "version": "0.1.1",
   "description": "High-performance semantic JSX component analyzer built with Rust + OXC",
-  "main": "plugin.js",
-  "types": "plugin.d.ts",
+  "main": "dist/plugin.js",
+  "types": "dist/plugin.d.ts",
   "exports": {
     ".": {
-      "types": "./plugin.d.ts",
-      "default": "./plugin.js"
+      "types": "./dist/plugin.d.ts",
+      "default": "./dist/plugin.js"
     },
     "./api": {
       "types": "./index.d.ts",
@@ -65,8 +65,7 @@
   "files": [
     "index.js",
     "index.d.ts",
-    "plugin.js",
-    "plugin.d.ts",
+    "dist/",
     "*.node"
   ]
 }
