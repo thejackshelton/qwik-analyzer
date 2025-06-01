@@ -93,6 +93,7 @@ export default function qwikAnalyzer(options: QwikAnalyzerOptions = {}): PluginO
 
       try {
         // Pass code content to Rust, get transformed code back
+        console.log("Analyzing and transforming code");
         const transformedCode = await napiWrapper.analyzeAndTransformCode(code, cleanedId);
         
         // Only return if code was actually transformed
@@ -111,16 +112,25 @@ export default function qwikAnalyzer(options: QwikAnalyzerOptions = {}): PluginO
       return null;
     },
 
-    async handleHotUpdate(ctx) {
-      const { file, server } = ctx;
-      const change = { event: "update" };
+    watchChange(id) {
+      debug(`File changed: ${id}`);
       
-      debug(`File update: ${file}`);
-
       try {
-        await napiWrapper.analyzeFileChanged(file, change.event);
+        napiWrapper.analyzeFileChanged(id, "change");
       } catch (error) {
         debug(`Error processing file change: ${error}`);
+      }
+    },
+
+    handleHotUpdate(ctx) {
+      const { file, server } = ctx;
+      
+      const module = server.moduleGraph.getModuleById(file);
+      if (module) {
+        for (const importer of module.importers) {
+          server.moduleGraph.invalidateModule(importer);
+          debug(`Invalidated importer: ${importer.id}`);
+        }
       }
     }
   };
