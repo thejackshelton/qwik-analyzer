@@ -1,6 +1,8 @@
 use oxc_ast::ast::JSXOpeningElement;
 use oxc_ast::AstKind;
 use oxc_semantic::Semantic;
+use oxc_syntax::identifier::is_identifier_name;
+use oxc_syntax::keyword::is_reserved_keyword_or_global_object;
 use phf::phf_set;
 
 use crate::component_analyzer::utils::debug;
@@ -200,10 +202,23 @@ fn parse_member_component(element_name: &str) -> Option<String> {
 }
 
 fn is_component_name(name: &str) -> bool {
-    name.chars()
+    if !is_identifier_name(name) {
+        return false;
+    }
+
+    if !name
+        .chars()
         .next()
         .map_or(false, |c| c.is_ascii_uppercase())
-        && !is_html_element(name)
+    {
+        return false;
+    }
+
+    if is_reserved_keyword_or_global_object(name) {
+        return false;
+    }
+
+    !is_html_element(name)
 }
 
 pub fn extract_jsx_element_name(jsx_opening: &JSXOpeningElement) -> Option<String> {
