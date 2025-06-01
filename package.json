@@ -48,7 +48,6 @@
     "build:debug": "napi build --platform && tsc",
     "build:rust": "napi build --platform --release",
     "build:ts": "tsc",
-    "prepublishOnly": "napi prepublish -t npm",
     "test": "cargo test",
     "universal": "napi universal",
     "version": "napi version"
@@ -58,6 +57,7 @@
     "index.js",
     "index.d.ts",
     "plugin.js",
-    "plugin.d.ts"
+    "plugin.d.ts",
+    "*.node"
   ]
 }

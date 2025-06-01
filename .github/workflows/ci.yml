@@ -97,22 +97,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: Create npm platform directories
+      - name: Copy binaries to root
         run: |
-          mkdir -p npm/win32-x64-msvc
-          mkdir -p npm/darwin-x64
-          mkdir -p npm/linux-x64-gnu
-          mkdir -p npm/linux-x64-musl
-          mkdir -p npm/linux-arm64-gnu
-          mkdir -p npm/win32-ia32-msvc
-          mkdir -p npm/linux-arm-gnueabihf
-          mkdir -p npm/darwin-arm64
-          mkdir -p npm/win32-arm64-msvc
-          mkdir -p npm/linux-arm64-musl
-          mkdir -p npm/linux-riscv64-gnu
-          mkdir -p npm/linux-s390x-gnu
-      - name: Move artifacts
-        run: pnpm artifacts
+          find artifacts -name "*.node" -exec cp {} . \;
+          ls -la *.node
       - name: Build TypeScript
         run: pnpm build:ts
       - name: Version bump
