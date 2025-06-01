@@ -53,14 +53,11 @@ graph TD
 ## 📦 Installation
 
 ```bash
-# Install dependencies
-pnpm install
-
-# Build the Rust analyzer
-pnpm build
-
-# Start development server
-pnpm dev
+npm install qwik-analyzer
+# or
+pnpm add qwik-analyzer
+# or  
+yarn add qwik-analyzer
 ```
 
 ## 🎯 Usage
@@ -71,14 +68,30 @@ pnpm dev
 // vite.config.ts
 import { defineConfig } from 'vite'
 import { qwikVite } from '@builder.io/qwik/optimizer'
-import { qwikAnalyzer } from './vite-plugin-qwik-analyzer'
+import qwikAnalyzer from 'qwik-analyzer'
 
 export default defineConfig({
   plugins: [
-    qwikAnalyzer(), // Add the analyzer plugin
+    qwikAnalyzer({
+      debug: true,  // Enable debug logging
+    }), 
     qwikVite()
   ]
 })
+```
+
+### Direct API Usage
+
+```typescript
+// For programmatic usage
+import { analyzeFile, analyzeAndTransformCode } from 'qwik-analyzer/api'
+
+// Analyze a file
+const result = analyzeFile('./src/components/Card.tsx')
+console.log(result.has_component) // true if components found
+
+// Transform code
+const transformedCode = analyzeAndTransformCode(sourceCode, filePath)
 ```
 
 ### Component Usage Pattern

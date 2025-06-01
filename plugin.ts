@@ -71,7 +71,7 @@ class NAPIWrapper {
 
 const napiWrapper = new NAPIWrapper();
 
-export function qwikAnalyzer(options: QwikAnalyzerOptions = {}): PluginOption {
+export default function qwikAnalyzer(options: QwikAnalyzerOptions = {}): PluginOption {
   isDebugMode = options.debug ?? false;
   moduleSpecifier = options.moduleSpecifier;
   

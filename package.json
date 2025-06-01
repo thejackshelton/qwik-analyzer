@@ -1,9 +1,20 @@
 {
   "name": "qwik-analyzer",
   "version": "0.1.0",
-  "description": "Fast Qwik component analyzer using OXC and Rust",
-  "main": "index.js",
-  "types": "index.d.ts",
+  "description": "High-performance semantic JSX component analyzer built with Rust + OXC",
+  "main": "plugin.js",
+  "types": "plugin.d.ts",
+  "exports": {
+    ".": {
+      "types": "./plugin.d.ts",
+      "default": "./plugin.js"
+    },
+    "./api": {
+      "types": "./index.d.ts", 
+      "default": "./index.js"
+    }
+  },
+  "keywords": ["qwik", "jsx", "analyzer", "rust", "vite", "plugin", "semantic", "performance"],
   "napi": {
     "binaryName": "qwik-analyzer",
     "targets": [
