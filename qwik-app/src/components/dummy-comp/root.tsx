@@ -1,6 +1,6 @@
 import { component$, Slot } from "@builder.io/qwik";
 import { Description } from "./description";
-import { isComponentPresent } from "../../utils/qwik-analyzer";
+import { isComponentPresent } from "qwik-analyzer";
 import { Title } from "./title";
 
 export const Root = component$(() => {

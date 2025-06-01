@@ -29,6 +29,7 @@
     "undici": "*",
     "vite": "5.3.5",
     "vite-tsconfig-paths": "^4.2.1",
-    "@kunai-consulting/qwik": "^0.2"
+    "@kunai-consulting/qwik": "^0.2",
+    "qwik-analyzer": "0.1.4"
   }
 }
