@@ -169,7 +169,7 @@ pub fn extract_imported_jsx_components(semantic: &Semantic) -> Vec<String> {
             continue;
         };
 
-        // Handle module.Component syntax (e.g., Icons.Home)
+        // namespaced / compound components
         if element_name.contains('.') {
             if let Some(full_component) = parse_member_component(&element_name) {
                 if !components.contains(&full_component) {
@@ -180,7 +180,7 @@ pub fn extract_imported_jsx_components(semantic: &Semantic) -> Vec<String> {
             continue;
         }
 
-        // Handle direct component imports (must start with uppercase and not be HTML)
+        // direct imports
         if is_component_name(&element_name) && !components.contains(&element_name) {
             components.push(element_name.clone());
             debug(&format!("🏷️ Found imported component: {}", element_name));

@@ -83,7 +83,6 @@ pub fn analyze_and_transform_code(code: String, file_path: String) -> napi::Resu
         return Ok(code);
     }
 
-    // Apply transformations in reverse order to maintain offsets
     let mut transformed_code = code;
     let mut transformations = result.transformations;
     transformations.sort_by(|a, b| b.start.cmp(&a.start));
