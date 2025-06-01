@@ -1,6 +1,6 @@
 {
   "name": "qwik-analyzer",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "High-performance semantic JSX component analyzer built with Rust + OXC",
   "main": "plugin.js",
   "types": "plugin.d.ts",
@@ -10,16 +10,25 @@
       "default": "./plugin.js"
     },
     "./api": {
-      "types": "./index.d.ts", 
+      "types": "./index.d.ts",
       "default": "./index.js"
     }
   },
-  "keywords": ["qwik", "jsx", "analyzer", "rust", "vite", "plugin", "semantic", "performance"],
+  "keywords": [
+    "qwik",
+    "jsx",
+    "analyzer",
+    "rust",
+    "vite",
+    "plugin",
+    "semantic",
+    "performance"
+  ],
   "napi": {
     "binaryName": "qwik-analyzer",
     "targets": [
       "x86_64-pc-windows-msvc",
-      "x86_64-apple-darwin", 
+      "x86_64-apple-darwin",
       "x86_64-unknown-linux-gnu",
       "x86_64-unknown-linux-musl",
       "aarch64-unknown-linux-gnu",
