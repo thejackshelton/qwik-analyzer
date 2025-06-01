@@ -70,6 +70,8 @@ class NAPIWrapper {
 
 const napiWrapper = new NAPIWrapper();
 
+export { isComponentPresent } from './utils';
+
 export default function qwikAnalyzer(options: QwikAnalyzerOptions = {}): PluginOption {
   isDebugMode = options.debug ?? false;
 
