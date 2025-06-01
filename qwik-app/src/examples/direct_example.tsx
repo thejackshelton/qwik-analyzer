@@ -1,27 +1,14 @@
-import { component$, useStyles$ } from "@builder.io/qwik";
-import { Checkbox } from "@kunai-consulting/qwik";
-import styles from "./checkbox.css?inline";
+import { component$ } from "@builder.io/qwik";
+import { DummyComp } from "../components/dummy-comp";
 
 export default component$(() => {
-  useStyles$(styles);
-
   return (
-    <Checkbox.Root description>
-      <div
-        style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}
-      >
-        <Checkbox.Trigger class="checkbox-trigger">
-          <Checkbox.Indicator class="checkbox-indicator">
-            Checked
-          </Checkbox.Indicator>
-        </Checkbox.Trigger>
-        <Checkbox.Label>I accept the Terms and Conditions</Checkbox.Label>
+    <DummyComp.Root>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+        <button type="button">Some trigger</button>
+        <label>I accept the Terms and Conditions</label>
       </div>
-      <Checkbox.Description style={{ color: "#b8c1cc" }}>
-        By checking this box, you acknowledge that you have read, understood, and agree to
-        our Terms of Service and Privacy Policy. This includes consent to process your
-        personal data as described in our policies.
-      </Checkbox.Description>
-    </Checkbox.Root>
+      <DummyComp.Description />
+    </DummyComp.Root>
   );
 }); 
