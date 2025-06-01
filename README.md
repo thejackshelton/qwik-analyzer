@@ -120,8 +120,8 @@ Analyzes a file and returns transformation information.
 **Returns:**
 ```typescript
 interface AnalysisResult {
-  hasDescription: boolean       // True if target components found
-  filePath: string             // Path of analyzed file
+  has_component: boolean        // True if target components found
+  file_path: string            // Path of analyzed file
   dependencies: string[]       // Import dependencies  
   transformations: Transformation[]  // Code transformations
 }
@@ -146,7 +146,7 @@ Handle file change events for HMR integration.
 ### 1. Semantic Parser Pipeline
 
 ```rust
-// High-level flow
+// High-level flow with performance optimizations
 pub fn analyze_code_with_semantics(
     source_text: &str, 
     file_path: &Path
@@ -157,7 +157,7 @@ pub fn analyze_code_with_semantics(
     // 2. Build semantic model with symbol table
     let semantic = oxc_semantic::SemanticBuilder::new().build(&program);
     
-    // 3. Extract JSX components from current file
+    // 3. Extract JSX components with O(1) deduplication
     let jsx_components = extract_imported_jsx_components(&semantic);
     
     // 4. Resolve imports and analyze target files
@@ -165,6 +165,48 @@ pub fn analyze_code_with_semantics(
     
     // 5. Generate precise transformations
     let transformations = generate_transformations(&component_calls);
+}
+
+// Enhanced component name validation with oxc_syntax
+fn is_component_name(name: &str) -> bool {
+    // Validate JavaScript identifier
+    if !oxc_syntax::identifier::is_identifier_name(name) {
+        return false;
+    }
+    
+    // React component convention (uppercase)
+    if !name.chars().next().map_or(false, |c| c.is_ascii_uppercase()) {
+        return false;
+    }
+    
+    // Reject reserved keywords/globals
+    if oxc_syntax::keyword::is_reserved_keyword_or_global_object(name) {
+        return false;
+    }
+    
+    // Reject HTML elements (PHF set O(1) lookup)
+    !is_html_element(name)
+}
+
+// O(1) component deduplication with HashSet
+pub fn extract_imported_jsx_components(semantic: &Semantic) -> Vec<String> {
+    let mut components = HashSet::new(); // O(1) insertions vs O(n) Vec::contains
+    
+    for node in semantic.nodes().iter() {
+        let AstKind::JSXOpeningElement(jsx_opening) = node.kind() else {
+            continue; // Early bailout patterns
+        };
+        
+        let Some(element_name) = extract_jsx_element_name(jsx_opening) else {
+            continue;
+        };
+
+        if is_component_name(&element_name) && components.insert(element_name.clone()) {
+            // Only process each component once (O(1) deduplication)
+        }
+    }
+    
+    components.into_iter().collect()
 }
 ```
 
