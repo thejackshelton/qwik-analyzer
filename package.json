@@ -3,6 +3,7 @@
   "version": "0.1.1",
   "description": "High-performance semantic JSX component analyzer built with Rust + OXC",
   "main": "dist/plugin.js",
+  "type": "module",
   "types": "dist/plugin.d.ts",
   "exports": {
     ".": {
