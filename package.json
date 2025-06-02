@@ -1,8 +1,8 @@
 {
 	"name": "qwik-analyzer",
 	"version": "0.0.0",
-	"main": "index.js",
-	"types": "index.d.ts",
+	"main": "src/vite/plugin.ts",
+	"types": "src/vite/plugin.ts",
 	"napi": {
 		"name": "qwik-analyzer",
 		"triples": {

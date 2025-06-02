@@ -17,7 +17,6 @@ export function debug(message: string): void {
 	}
 }
 
-// Lazy loader for NAPI functions to avoid esbuild .node file issues during config loading
 class NAPIWrapper {
 	private _module: NAPIModule | null = null;
 	private _loading: Promise<NAPIModule> | null = null;
@@ -38,7 +37,6 @@ class NAPIWrapper {
 
 	private async loadModule(): Promise<NAPIModule> {
 		try {
-			// Use dynamic import to avoid static analysis by bundlers
 			const importFn = new Function("specifier", "return import(specifier)");
 			const napiModule = await importFn("../index.js");
 			debug("NAPI module loaded successfully");
@@ -87,13 +85,10 @@ export function isComponentPresent<T>(
 	component: unknown,
 	injectedValue?: boolean,
 ): boolean {
-	// If we have an injected value from the analyzer, use it
 	if (injectedValue !== undefined) {
 		return injectedValue;
 	}
 
-	// This function is replaced at build time by the qwik-analyzer
-	// In development, we return false as a fallback
 	return false;
 }
 
@@ -109,7 +104,6 @@ export default function qwikAnalyzer(
 		async transform(code: string, id: string) {
 			const cleanedId = id.split("?")[0];
 
-			// Only transform TypeScript/JSX files, skip node_modules
 			if (
 				(!cleanedId.endsWith(".tsx") && !cleanedId.endsWith(".ts")) ||
 				cleanedId.includes("node_modules")
@@ -120,24 +114,21 @@ export default function qwikAnalyzer(
 			debug(`Transforming ${cleanedId}`);
 
 			try {
-				// Pass code content to Rust, get transformed code back
 				console.log("Analyzing and transforming code");
 				const transformedCode = await napiWrapper.analyzeAndTransformCode(
 					code,
 					cleanedId,
 				);
 
-				// Only return if code was actually transformed
 				if (transformedCode !== code) {
 					debug(`Transformed ${cleanedId}`);
 					return {
 						code: transformedCode,
-						map: null, // TODO: Generate source map if needed
+						map: null,
 					};
 				}
 			} catch (error) {
 				debug(`NAPI module not available or error: ${error}`);
-				// Gracefully continue without transformation
 			}
 
 			return null;
