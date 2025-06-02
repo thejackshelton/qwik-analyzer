@@ -14,6 +14,7 @@ export interface AnalysisResult {
   dependencies: Array<string>
   transformations: Array<Transformation>
 }
-export declare function analyzeFile(filePath: string): AnalysisResult
-export declare function analyzeFileChanged(filePath: string, event: string): void
-export declare function analyzeAndTransformCode(code: string, filePath: string): string
+function analyzeFile(filePath: string): AnalysisResult
+function analyzeFileChanged(filePath: string, event: string): void
+function analyzeAndTransformCode(code: string, filePath: string): string
+undefinedundefined
