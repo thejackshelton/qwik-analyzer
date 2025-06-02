@@ -62,6 +62,8 @@ pub fn analyze_code_with_semantics(
 
     for call in &mut all_component_calls {
         call.is_present_in_subtree = component_presence::has_component(semantic, &call.component_name, file_path)?;
+        debug(&format!("📋 Component call '{}' from '{}' -> present: {}", 
+                      call.component_name, call.source_file, call.is_present_in_subtree));
     }
 
     debug(&format!("📊 Analysis found {} isComponentPresent calls from imported components, {} have target components in current file", 

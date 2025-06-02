@@ -6,7 +6,7 @@ import AliasExample from "../examples/aliased_example";
 import CheckboxExample from "../examples/checkbox";
 
 export default component$(() => {
-	return <AliasExample />;
+	return <CheckboxExample />;
 });
 
 export const head: DocumentHead = {

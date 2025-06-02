@@ -59,7 +59,7 @@ fn generate_jsx_prop_transformations(
             element_name
         ));
 
-        let prop_name = format!("__qwik_analyzer_has_{}", call.component_name);
+        let prop_name = format!("__qwik_analyzer_has_{}", call.component_name.replace(".", "_"));
         let prop_value = call.is_present_in_subtree;
         let new_prop = format!(" {}={{{}}}", prop_name, prop_value);
         let insert_pos = jsx_opening.span.end - 1;
@@ -189,13 +189,15 @@ fn create_component_present_call_transformations(
         let arg_span = first_arg.span();
         let arg_text = &source_text[arg_span.start as usize..arg_span.end as usize];
         
-        let component_name = match extract_component_name_from_argument(first_arg)
-            .or_else(|| extract_member_component_name(&source_text, arg_span.start as usize, arg_span.end as usize)) {
-            Some(name) => name,
-            None => continue,
+        let component_name = if let Some(name) = extract_component_name_from_argument(first_arg) {
+            name
+        } else if arg_text.contains('.') {
+            arg_text.to_string()
+        } else {
+            continue
         };
 
-        let prop_name = format!("__qwik_analyzer_has_{}", component_name);
+        let prop_name = format!("__qwik_analyzer_has_{}", component_name.replace(".", "_"));
         let new_call = format!("isComponentPresent({}, props.{})", arg_text, prop_name);
 
         transformations.push(Transformation {

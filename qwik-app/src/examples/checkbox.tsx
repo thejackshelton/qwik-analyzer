@@ -9,6 +9,9 @@ export default component$(() => {
       <Checkbox.Root>
         <Checkbox.Description />
       </Checkbox.Root>
+
+      <DummyComp.Title />
+      
     </DummyComp.Root>
   )
 })

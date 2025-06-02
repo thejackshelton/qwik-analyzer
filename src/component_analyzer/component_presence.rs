@@ -6,7 +6,7 @@ use crate::component_analyzer::import_resolver::{
     find_import_source_for_component, resolve_import_path,
 };
 use crate::component_analyzer::jsx_analysis::extract_imported_jsx_components;
-use crate::component_analyzer::utils::{debug, component_exists_in_jsx, ComponentPresenceCall};
+use crate::component_analyzer::utils::{debug, component_exists_in_jsx_with_path, ComponentPresenceCall};
 use crate::Result;
 
 pub fn find_presence_calls(
@@ -74,7 +74,7 @@ pub fn has_component(
         component_name
     ));
 
-    if component_exists_in_jsx(semantic, component_name) {
+    if component_exists_in_jsx_with_path(semantic, component_name, current_file) {
         debug(&format!("✅ Found direct usage of {} in JSX", component_name));
         return Ok(true);
     }
@@ -107,15 +107,17 @@ pub fn has_component(
 
         let presence_calls = find_calls_in_file(&resolved_path)?;
         for call in &presence_calls {
-            if call.component_name == component_name && component_exists_in_jsx(semantic, component_name) {
+            if call.component_name == component_name {
                 debug(&format!("✅ Found {} via imported component {}", component_name, jsx_component));
                 return Ok(true);
             }
         }
         
-        if presence_calls.is_empty() && file_has_component(&resolved_path, component_name)? {
-            debug(&format!("✅ Found {} in imported component {}", component_name, jsx_component));
-            return Ok(true);
+        if presence_calls.is_empty() {
+            if !component_name.contains('.') && file_has_component(&resolved_path, component_name)? {
+                debug(&format!("✅ Found {} in imported component {}", component_name, jsx_component));
+                return Ok(true);
+            }
         }
     }
 

@@ -14,7 +14,7 @@ export const Root = component$(() => {
 			<Slot />
 			<p>Description present: {isDescription ? "true" : "false"}</p>
 			<p>Title present: {isTitle ? "true" : "false"}</p>
-			<p>Checkbox present: {isCheckbox ? "true" : "false"}</p>
+			<p>Checkbox description present: {isCheckbox ? "true" : "false"}</p>
 		</div>
 	);
 });

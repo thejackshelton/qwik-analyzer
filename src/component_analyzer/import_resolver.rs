@@ -176,9 +176,10 @@ pub fn find_calls_in_file(file_path: &str) -> Result<Vec<ComponentPresenceCall>>
             name
         } else {
             let arg_span = first_arg.span();
-            if let Some(name) = extract_member_component_name(&source_text, arg_span.start as usize, arg_span.end as usize) {
-                debug(&format!("Extracted property name from member expression in find_calls_in_file: {}", name));
-                name
+            let full_text = &source_text[arg_span.start as usize..arg_span.end as usize];
+            if full_text.contains('.') {
+                debug(&format!("Extracted full member expression from find_calls_in_file: {}", full_text));
+                full_text.to_string()
             } else {
                 debug(&format!("Could not extract component name from argument in find_calls_in_file"));
                 continue;
