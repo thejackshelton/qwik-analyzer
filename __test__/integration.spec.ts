@@ -70,8 +70,8 @@ describe("qwik-analyzer integration tests", () => {
 	it("should handle non-existent files gracefully", async () => {
 		expect(() => analyzeFile("/nonexistent/file.tsx")).toThrow(
 			expect.objectContaining({
-				message: expect.stringContaining(
-					"Analysis failed: No such file or directory (os error 2)",
+				message: expect.stringMatching(
+					/Analysis failed: (No such file or directory \(os error 2\)|The system cannot find the path specified\. \(os error 3\))/,
 				),
 			}),
 		);
