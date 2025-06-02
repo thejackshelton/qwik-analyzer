@@ -9,7 +9,7 @@ use std::path::Path;
 
 use crate::component_analyzer::jsx_analysis::extract_jsx_element_name;
 use crate::component_analyzer::utils::{
-    debug, extract_component_name_from_argument, extract_function_name, extract_member_component_name, ComponentPresenceCall,
+    debug, extract_component_name_from_argument, extract_function_name, ComponentPresenceCall,
 };
 use crate::Result;
 
