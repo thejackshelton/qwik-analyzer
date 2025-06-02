@@ -192,6 +192,6 @@ MIT © Jack Shelton
 
 ## Related Projects
 
-- [Qwik](https://qwik.builder.io/) - The meta-framework this analyzer is built for
+- [Qwik](https://qwik.builder.io/) - The framework this analyzer is built for
 - [NAPI-RS](https://napi.rs/) - Rust bindings for Node.js used in this project
-- [Vite](https://vitejs.dev/) - The build tool this integrates with 
+- [Vite](https://vitejs.dev/) - The build tool for the web
