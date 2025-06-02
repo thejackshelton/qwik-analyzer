@@ -1,0 +1,15 @@
+{
+  "name": "qwik-analyzer-darwin-universal",
+  "version": "0.0.0",
+  "os": [
+    "darwin"
+  ],
+  "main": "qwik-analyzer.darwin-universal.node",
+  "files": [
+    "qwik-analyzer.darwin-universal.node"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">= 10"
+  }
+}
