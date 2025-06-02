@@ -37,12 +37,10 @@ pub fn component_exists_in_jsx_with_path(semantic: &Semantic, component_name: &s
         };
 
         if let Some(element_name) = extract_jsx_element_name(jsx_opening) {
-            // Exact match
             if element_name == component_name {
                 return true;
             }
             
-            // For simple target components, check if accessible through local namespaces
             if !component_name.contains('.') && element_name.contains('.') {
                 let parts: Vec<&str> = element_name.split('.').collect();
                 if parts.len() == 2 {
@@ -59,12 +57,10 @@ pub fn component_exists_in_jsx_with_path(semantic: &Semantic, component_name: &s
     false
 }
 
-/// Check if a namespace can be resolved to a local file by checking if resolution succeeds
 fn can_resolve_namespace_locally(semantic: &Semantic, namespace: &str, current_file: &std::path::Path) -> bool {
     use crate::component_analyzer::import_resolver::{find_import_source_for_component, resolve_import_path};
     
     if let Some(import_source) = find_import_source_for_component(semantic, namespace) {
-        // If resolve_import_path succeeds, it's a local file. If it fails, it's external.
         resolve_import_path(&import_source, current_file).is_ok()
     } else {
         false
