@@ -1,4 +1,5 @@
 use oxc_ast::ast::CallExpression;
+use oxc_semantic::Semantic;
 
 #[derive(Debug, Clone)]
 pub struct ComponentPresenceCall {
@@ -23,21 +24,35 @@ pub fn extract_component_name_from_argument(argument: &oxc_ast::ast::Argument) -
     
     match argument {
         Argument::Identifier(identifier) => Some(identifier.name.to_string()),
-        // Handle member expressions by directly checking the span and extracting from source
-        _ => {
-            // Try to get member expression
-            if let Some(member_expr) = argument.as_member_expression() {
-                debug(&format!("Found member expression argument"));
-                
-                // For member expressions like Checkbox.Description, we want the property name
-                // Since we can't easily access the property, we'll use the span to extract from source
-                // This requires the source text, which we don't have here
-                // For now, we'll have to handle this differently
-                None
-            } else {
-                debug(&format!("Non-identifier, non-member expression argument"));
-                None
-            }
+        _ => None,
+    }
+}
+
+pub fn extract_member_component_name(source_text: &str, span_start: usize, span_end: usize) -> Option<String> {
+    let arg_text = &source_text[span_start..span_end];
+    if let Some(dot_pos) = arg_text.rfind('.') {
+        Some(arg_text[dot_pos + 1..].to_string())
+    } else {
+        None
+    }
+}
+
+pub fn component_exists_in_jsx(semantic: &Semantic, component_name: &str) -> bool {
+    use oxc_ast::AstKind;
+    use crate::component_analyzer::jsx_analysis::extract_jsx_element_name;
+    
+    for node in semantic.nodes().iter() {
+        let AstKind::JSXOpeningElement(jsx_opening) = node.kind() else {
+            continue;
+        };
+
+        let Some(element_name) = extract_jsx_element_name(jsx_opening) else {
+            continue;
+        };
+
+        if element_name == component_name || element_name.ends_with(&format!(".{}", component_name)) {
+            return true;
         }
     }
+    false
 }

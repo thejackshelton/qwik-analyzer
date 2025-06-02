@@ -9,7 +9,7 @@ use std::path::Path;
 
 use crate::component_analyzer::jsx_analysis::extract_jsx_element_name;
 use crate::component_analyzer::utils::{
-    debug, extract_component_name_from_argument, extract_function_name, ComponentPresenceCall,
+    debug, extract_component_name_from_argument, extract_function_name, extract_member_component_name, ComponentPresenceCall,
 };
 use crate::Result;
 
@@ -58,9 +58,7 @@ pub fn resolve_import_path(import_source: &str, current_file: &Path) -> Result<S
         .parent()
         .ok_or("Could not get parent directory")?;
 
-    // Handle TypeScript path aliases manually
     if import_source.starts_with("~/") {
-        // Find the project root by looking for package.json
         let mut search_dir = current_dir;
         let mut project_root = None;
         
@@ -73,13 +71,11 @@ pub fn resolve_import_path(import_source: &str, current_file: &Path) -> Result<S
         }
         
         if let Some(root) = project_root {
-            let relative_path = &import_source[2..]; // Remove "~/"
+            let relative_path = &import_source[2..];
             let resolved_path = root.join("src").join(relative_path);
             if resolved_path.exists() {
                 return Ok(resolved_path.to_string_lossy().to_string());
             }
-            
-            // Try with extensions
             for ext in VALID_EXTENSIONS {
                 let path_with_ext = resolved_path.with_extension(ext);
                 if path_with_ext.exists() {
@@ -147,16 +143,15 @@ pub fn find_calls_in_file(file_path: &str) -> Result<Vec<ComponentPresenceCall>>
     let allocator = Allocator::default();
     let source_type = SourceType::from_path(Path::new(file_path)).unwrap_or_default();
 
-    let oxc_parser::ParserReturn {
-        program, errors, ..
-    } = oxc_parser::Parser::new(&allocator, &source_text, source_type).parse();
+    let oxc_parser::ParserReturn { program, errors, .. } = 
+        oxc_parser::Parser::new(&allocator, &source_text, source_type).parse();
 
     if !errors.is_empty() {
         return Ok(Vec::new());
     }
 
     let semantic_ret = oxc_semantic::SemanticBuilder::new().build(&program);
-    let semantic = semantic_ret.semantic;
+    let semantic = &semantic_ret.semantic;
 
     let mut calls = Vec::new();
 
@@ -180,17 +175,12 @@ pub fn find_calls_in_file(file_path: &str) -> Result<Vec<ComponentPresenceCall>>
         let component_name = if let Some(name) = extract_component_name_from_argument(first_arg) {
             name
         } else {
-            // Handle member expressions by extracting from source text
             let arg_span = first_arg.span();
-            let arg_text = &source_text[arg_span.start as usize..arg_span.end as usize];
-            
-            // For member expressions like Checkbox.Description, extract the property name
-            if let Some(dot_pos) = arg_text.rfind('.') {
-                let property_name = &arg_text[dot_pos + 1..];
-                debug(&format!("Extracted property name from member expression in find_calls_in_file: {}", property_name));
-                property_name.to_string()
+            if let Some(name) = extract_member_component_name(&source_text, arg_span.start as usize, arg_span.end as usize) {
+                debug(&format!("Extracted property name from member expression in find_calls_in_file: {}", name));
+                name
             } else {
-                debug(&format!("Could not extract component name from argument in find_calls_in_file: {}", arg_text));
+                debug(&format!("Could not extract component name from argument in find_calls_in_file"));
                 continue;
             }
         };
@@ -215,18 +205,16 @@ pub fn file_has_component(file_path: &str, target_component: &str) -> Result<boo
     let allocator = Allocator::default();
     let source_type = SourceType::from_path(Path::new(file_path)).unwrap_or_default();
 
-    let oxc_parser::ParserReturn {
-        program, errors, ..
-    } = oxc_parser::Parser::new(&allocator, &source_text, source_type).parse();
+    let oxc_parser::ParserReturn { program, errors, .. } = 
+        oxc_parser::Parser::new(&allocator, &source_text, source_type).parse();
 
     if !errors.is_empty() {
         return Ok(false);
     }
 
     let semantic_ret = oxc_semantic::SemanticBuilder::new().build(&program);
-    let semantic = semantic_ret.semantic;
+    let semantic = &semantic_ret.semantic;
 
-    // Check for target component usage
     for node in semantic.nodes().iter() {
         let AstKind::JSXOpeningElement(jsx_opening) = node.kind() else {
             continue;

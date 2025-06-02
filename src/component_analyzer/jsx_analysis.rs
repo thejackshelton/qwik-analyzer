@@ -172,7 +172,6 @@ pub fn extract_imported_jsx_components(semantic: &Semantic) -> Vec<String> {
             continue;
         };
 
-        // namespaced / compound components
         if element_name.contains('.') {
             if let Some(full_component) = parse_member_component(&element_name) {
                 if components.insert(full_component.clone()) {
@@ -182,7 +181,6 @@ pub fn extract_imported_jsx_components(semantic: &Semantic) -> Vec<String> {
             continue;
         }
 
-        // direct imports
         if is_component_name(&element_name) && components.insert(element_name.clone()) {
             debug(&format!("🏷️ Found imported component: {}", element_name));
         }
