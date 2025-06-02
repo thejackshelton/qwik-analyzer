@@ -60,16 +60,20 @@ describe("qwik-analyzer integration tests", () => {
 
 		it(`${testCase.name}: should handle file change events`, () => {
 			const filePath = path.resolve(__dirname, testCase.file);
-			
+
 			expect(fs.existsSync(filePath)).toBe(true);
-			
+
 			expect(() => analyzeFileChanged(filePath, "update")).not.toThrow();
 		});
 	}
 
 	it("should handle non-existent files gracefully", async () => {
 		expect(() => analyzeFile("/nonexistent/file.tsx")).toThrow(
-			expect.stringContaining("No such file or directory")
+			expect.objectContaining({
+				message: expect.stringContaining(
+					"Analysis failed: No such file or directory (os error 2)",
+				),
+			}),
 		);
 	});
 });
