@@ -1,5 +1,6 @@
 use oxc_ast::AstKind;
 use oxc_semantic::Semantic;
+use oxc_span::GetSpan;
 use std::path::Path;
 
 use crate::component_analyzer::jsx_analysis::extract_jsx_element_name;
@@ -193,6 +194,7 @@ fn create_component_present_call_transformations(
     file_path: &Path,
 ) -> Result<Vec<Transformation>> {
     let mut transformations = Vec::new();
+    let source_text = std::fs::read_to_string(file_path)?;
 
     for node in semantic.nodes().iter() {
         let AstKind::CallExpression(call_expr) = node.kind() else {
@@ -211,14 +213,28 @@ fn create_component_present_call_transformations(
             continue;
         };
 
-        let Some(component_name) = extract_component_name_from_argument(first_arg) else {
-            continue;
+        let (component_name, original_arg_text) = if let Some(name) = extract_component_name_from_argument(first_arg) {
+            (name.clone(), name)
+        } else {
+            // Handle member expressions by extracting from source text
+            let arg_span = first_arg.span();
+            let arg_text = &source_text[arg_span.start as usize..arg_span.end as usize];
+            
+            // For member expressions like Checkbox.Description, extract the property name
+            if let Some(dot_pos) = arg_text.rfind('.') {
+                let property_name = &arg_text[dot_pos + 1..];
+                debug(&format!("Extracted property name from member expression: {}", property_name));
+                (property_name.to_string(), arg_text.to_string())
+            } else {
+                debug(&format!("Could not extract component name from argument: {}", arg_text));
+                continue;
+            }
         };
 
         let prop_name = format!("__qwik_analyzer_has_{}", component_name);
         let new_call = format!(
             "isComponentPresent({}, props.{})",
-            component_name, prop_name
+            original_arg_text, prop_name
         );
 
         transformations.push(Transformation {

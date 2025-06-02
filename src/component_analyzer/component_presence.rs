@@ -35,9 +35,6 @@ pub fn find_presence_calls(
             return Ok(Vec::new());
         };
 
-        if !import_source.starts_with('.') {
-            return Ok(Vec::new());
-        }
 
         let Ok(module_dir) = resolve_import_path(&import_source, current_file) else {
             return Ok(Vec::new());
@@ -58,9 +55,6 @@ pub fn find_presence_calls(
         return Ok(Vec::new());
     };
 
-    if !import_source.starts_with('.') {
-        return Ok(Vec::new());
-    }
 
     let Ok(resolved_path) = resolve_import_path(&import_source, current_file) else {
         return Ok(Vec::new());
@@ -114,7 +108,7 @@ pub fn has_component(
         component_name
     ));
 
-    // Check imported components
+    // Check imported components for isComponentPresent calls
     let jsx_components = extract_imported_jsx_components(semantic);
 
     for jsx_component in jsx_components {
@@ -126,9 +120,6 @@ pub fn has_component(
             continue;
         };
 
-        if !import_source.starts_with('.') {
-            continue;
-        }
 
         let Ok(resolved_path) = resolve_import_path(&import_source, current_file) else {
             continue;
@@ -139,12 +130,62 @@ pub fn has_component(
             jsx_component, resolved_path, component_name
         ));
 
-        if file_has_component(&resolved_path, component_name)? {
+        // Find isComponentPresent calls in the imported component's file
+        let presence_calls = find_calls_in_file(&resolved_path)?;
+        
+        // Check if any of these calls are for our target component
+        for call in &presence_calls {
+            if call.component_name == component_name {
+                // Now check if the component is present in the current file's JSX
+                // (not the imported component's file)
+                debug(&format!(
+                    "🔍 Found isComponentPresent({}) call in imported component {}, checking current file for component presence",
+                    component_name, jsx_component
+                ));
+                
+                // Check in current file's JSX for the target component
+                for node in semantic.nodes().iter() {
+                    let AstKind::JSXOpeningElement(jsx_opening) = node.kind() else {
+                        continue;
+                    };
+
+                    let Some(element_name) = extract_jsx_element_name(jsx_opening) else {
+                        continue;
+                    };
+
+                    if element_name == component_name {
+                        debug(&format!(
+                            "✅ Found direct usage of {} in current file JSX",
+                            component_name
+                        ));
+                        return Ok(true);
+                    }
+
+                    if element_name.ends_with(&format!(".{}", component_name)) {
+                        debug(&format!(
+                            "✅ Found member expression usage of {} in current file JSX: {}",
+                            component_name, element_name
+                        ));
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+        
+        // If no isComponentPresent calls found, check if the imported component itself contains the target component
+        if presence_calls.is_empty() {
             debug(&format!(
-                "✅ Found {} in imported component {}",
-                component_name, jsx_component
+                "📂 No isComponentPresent calls in {}, checking if it contains {} directly",
+                jsx_component, component_name
             ));
-            return Ok(true);
+            
+            if file_has_component(&resolved_path, component_name)? {
+                debug(&format!(
+                    "✅ Found {} in imported component {}",
+                    component_name, jsx_component
+                ));
+                return Ok(true);
+            }
         }
     }
 

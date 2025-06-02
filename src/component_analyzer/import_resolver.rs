@@ -3,7 +3,7 @@ use oxc_ast::AstKind;
 use oxc_parser;
 use oxc_resolver::{ResolveOptions, Resolver};
 use oxc_semantic::Semantic;
-use oxc_span::{SourceType, VALID_EXTENSIONS};
+use oxc_span::{GetSpan, SourceType, VALID_EXTENSIONS};
 use std::fs;
 use std::path::Path;
 
@@ -57,6 +57,37 @@ pub fn resolve_import_path(import_source: &str, current_file: &Path) -> Result<S
     let current_dir = current_file
         .parent()
         .ok_or("Could not get parent directory")?;
+
+    // Handle TypeScript path aliases manually
+    if import_source.starts_with("~/") {
+        // Find the project root by looking for package.json
+        let mut search_dir = current_dir;
+        let mut project_root = None;
+        
+        while let Some(parent) = search_dir.parent() {
+            if search_dir.join("package.json").exists() {
+                project_root = Some(search_dir);
+                break;
+            }
+            search_dir = parent;
+        }
+        
+        if let Some(root) = project_root {
+            let relative_path = &import_source[2..]; // Remove "~/"
+            let resolved_path = root.join("src").join(relative_path);
+            if resolved_path.exists() {
+                return Ok(resolved_path.to_string_lossy().to_string());
+            }
+            
+            // Try with extensions
+            for ext in VALID_EXTENSIONS {
+                let path_with_ext = resolved_path.with_extension(ext);
+                if path_with_ext.exists() {
+                    return Ok(path_with_ext.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
 
     match resolver.resolve(current_dir, import_source) {
         Ok(resolution) => {
@@ -146,8 +177,22 @@ pub fn find_calls_in_file(file_path: &str) -> Result<Vec<ComponentPresenceCall>>
             continue;
         };
 
-        let Some(component_name) = extract_component_name_from_argument(first_arg) else {
-            continue;
+        let component_name = if let Some(name) = extract_component_name_from_argument(first_arg) {
+            name
+        } else {
+            // Handle member expressions by extracting from source text
+            let arg_span = first_arg.span();
+            let arg_text = &source_text[arg_span.start as usize..arg_span.end as usize];
+            
+            // For member expressions like Checkbox.Description, extract the property name
+            if let Some(dot_pos) = arg_text.rfind('.') {
+                let property_name = &arg_text[dot_pos + 1..];
+                debug(&format!("Extracted property name from member expression in find_calls_in_file: {}", property_name));
+                property_name.to_string()
+            } else {
+                debug(&format!("Could not extract component name from argument in find_calls_in_file: {}", arg_text));
+                continue;
+            }
         };
 
         debug(&format!(

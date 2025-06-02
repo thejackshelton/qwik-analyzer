@@ -16,7 +16,7 @@ const __dirname = path.dirname(__filename);
 interface TestCase {
   name: string;
   file: string;
-  expectedHasDescription: boolean;
+  expectedHasComponent: boolean;
   description: string;
   moduleSpecifier?: string;
 }
@@ -28,21 +28,21 @@ async function runIntegrationTests() {
     {
       name: 'Direct Example',
       file: '../qwik-app/src/examples/direct_example.tsx',
-      expectedHasDescription: true,
+      expectedHasComponent: true,
       description: 'Should detect DummyComp.Description directly within DummyComp.Root',
       moduleSpecifier: '../components/dummy-comp'
     },
     {
       name: 'Indirect Example', 
       file: '../qwik-app/src/examples/indirect_example.tsx',
-      expectedHasDescription: true,
+      expectedHasComponent: true,
       description: 'Should detect DummyComp.Description via imported Heyo component with recursive analysis',
       moduleSpecifier: '../components/dummy-comp'
     },
     {
       name: 'Heyo Component',
       file: '../qwik-app/src/examples/heyo.tsx', 
-      expectedHasDescription: false,
+      expectedHasComponent: false,
       description: 'Should return false - contains DummyComp.Description but not within DummyComp.Root',
       moduleSpecifier: '../components/dummy-comp'
     }
@@ -63,21 +63,21 @@ async function runIntegrationTests() {
     }
 
     try {
-      // Test the NAPI binding with module specifier
-      const result = await analyzeFile(filePath, testCase.moduleSpecifier);
+      // Test the NAPI binding
+      const result = await analyzeFile(filePath);
       
       console.log(`   📊 Analysis result: ${JSON.stringify(result, null, 2)}`);
       
-      if (result.hasDescription === testCase.expectedHasDescription) {
-        console.log(`   ✅ PASSED - Expected: ${testCase.expectedHasDescription}, Got: ${result.hasDescription}`);
+      if (result.hasComponent === testCase.expectedHasComponent) {
+        console.log(`   ✅ PASSED - Expected: ${testCase.expectedHasComponent}, Got: ${result.hasComponent}`);
         passedTests++;
       } else {
-        console.log(`   ❌ FAILED - Expected: ${testCase.expectedHasDescription}, Got: ${result.hasDescription}`);
+        console.log(`   ❌ FAILED - Expected: ${testCase.expectedHasComponent}, Got: ${result.hasComponent}`);
       }
 
       // Test file change event
       console.log('   🔄 Testing file change event...');
-      await analyzeFileChanged(filePath, 'update', testCase.moduleSpecifier);
+      await analyzeFileChanged(filePath, 'update');
       console.log('   ✅ File change event processed successfully');
 
     } catch (error) {
