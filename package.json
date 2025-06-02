@@ -3,6 +3,7 @@
 	"version": "0.0.0",
 	"main": "src/vite/plugin.ts",
 	"types": "src/vite/plugin.ts",
+	"packageManager": "pnpm@10.7.0",
 	"napi": {
 		"name": "qwik-analyzer",
 		"triples": {
