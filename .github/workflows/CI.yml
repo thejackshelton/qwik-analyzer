@@ -1,7 +1,7 @@
 name: CI
 env:
   DEBUG: napi:*
-  APP_NAME: qwik-analyzer
+  APP_NAME: package-template
   MACOSX_DEPLOYMENT_TARGET: '10.13'
   CARGO_INCREMENTAL: '1'
 permissions:
@@ -37,19 +37,8 @@ jobs:
           node-version: 22
           cache: 'pnpm'
 
-      - name: Install
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-
       - name: Install dependencies
         run: pnpm install
-
-      - name: Cargo fmt
-        run: cargo fmt -- --check
-
-      - name: Clippy
-        run: cargo clippy
 
   build:
     strategy:
@@ -67,25 +56,19 @@ jobs:
             target: i686-pc-windows-msvc
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
-            build: pnpm build --target x86_64-unknown-linux-gnu
+            build: pnpm build --target x86_64-unknown-linux-gnu --use-napi-cross
           - host: ubuntu-latest
             target: x86_64-unknown-linux-musl
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
-            build: pnpm build --target x86_64-unknown-linux-musl
+            build: pnpm build --target x86_64-unknown-linux-musl -x
           - host: macos-latest
             target: aarch64-apple-darwin
             build: pnpm build --target aarch64-apple-darwin
           - host: ubuntu-latest
             target: aarch64-unknown-linux-gnu
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian-aarch64
-            build: pnpm build --target aarch64-unknown-linux-gnu
+            build: pnpm build --target aarch64-unknown-linux-gnu --use-napi-cross
           - host: ubuntu-latest
             target: armv7-unknown-linux-gnueabihf
-            setup: |
-              sudo apt-get update
-              sudo apt-get install gcc-arm-linux-gnueabihf -y
-            build: pnpm build --target armv7-unknown-linux-gnueabihf
+            build: pnpm build --target armv7-unknown-linux-gnueabihf --use-napi-cross
           - host: ubuntu-latest
             target: aarch64-linux-android
             build: pnpm build --target aarch64-linux-android
@@ -94,13 +77,13 @@ jobs:
             build: pnpm build --target armv7-linux-androideabi
           - host: ubuntu-latest
             target: aarch64-unknown-linux-musl
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
-            build: |
-              rustup target add aarch64-unknown-linux-musl
-              pnpm build --target aarch64-unknown-linux-musl
+            build: pnpm build --target aarch64-unknown-linux-musl -x
           - host: windows-latest
             target: aarch64-pc-windows-msvc
             build: pnpm build --target aarch64-pc-windows-msvc
+          - host: ubuntu-latest
+            target: wasm32-wasip1-threads
+            build: pnpm build --target wasm32-wasip1-threads
     name: stable - ${{ matrix.settings.target }} - node@20
     runs-on: ${{ matrix.settings.host }}
     steps:
@@ -109,13 +92,11 @@ jobs:
         uses: pnpm/action-setup@v4
       - name: Setup node
         uses: actions/setup-node@v4
-        if: ${{ !matrix.settings.docker }}
         with:
           node-version: 22
           cache: pnpm
       - name: Install
         uses: dtolnay/rust-toolchain@stable
-        if: ${{ !matrix.settings.docker }}
         with:
           toolchain: stable
           targets: ${{ matrix.settings.target }}
@@ -130,13 +111,23 @@ jobs:
             .cargo-cache
             target/
           key: ${{ matrix.settings.target }}-cargo-${{ matrix.settings.host }}
+      - uses: goto-bus-stop/setup-zig@v2
+        if: ${{ contains(matrix.settings.target, 'musl') }}
+        with:
+          version: 0.13.0
+      - name: Install cargo-zigbuild
+        uses: taiki-e/install-action@v2
+        if: ${{ contains(matrix.settings.target, 'musl') }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          tool: cargo-zigbuild
       - name: Setup toolchain
         run: ${{ matrix.settings.setup }}
         if: ${{ matrix.settings.setup }}
         shell: bash
       - name: Install dependencies
         run: pnpm install
-        if: ${{ !matrix.settings.docker }}
       - name: Setup node x86
         uses: actions/setup-node@v4
         if: matrix.settings.target == 'i686-pc-windows-msvc'
@@ -144,21 +135,12 @@ jobs:
           node-version: 22
           cache: pnpm
           architecture: x86
-      - name: Build in docker
-        uses: addnab/docker-run-action@v3
-        if: ${{ matrix.settings.docker }}
-        with:
-          image: ${{ matrix.settings.docker }}
-          options: '--user 0:0 -v ${{ github.workspace }}/.cargo-cache/git/db:/usr/local/cargo/git/db -v ${{ github.workspace }}/.cargo/registry/cache:/usr/local/cargo/registry/cache -v ${{ github.workspace }}/.cargo/registry/index:/usr/local/cargo/registry/index -v ${{ github.workspace }}:/build -w /build'
-          run: |
-            npm install -g pnpm@10.7.0
-            ${{ matrix.settings.build }}
       - name: Build
         run: ${{ matrix.settings.build }}
-        if: ${{ !matrix.settings.docker }}
         shell: bash
       - name: Upload artifact
         uses: actions/upload-artifact@v4
+        if: matrix.settings.target != 'wasm32-wasip1-threads'
         with:
           name: bindings-${{ matrix.settings.target }}
           path: '*.node'
@@ -191,9 +173,11 @@ jobs:
           shell: bash
           run: |
             sudo pkg install -y -f curl node libnghttp2 npm
-            npm install -g pnpm@10.7.0
+            sudo npm install -g corepack
             curl https://sh.rustup.rs -sSf --output rustup.sh
             sh rustup.sh -y --profile minimal --default-toolchain beta
+            corepack prepare
+            corepack enable
             source "$HOME/.cargo/env"
             echo "~~~~ rustc --version ~~~~"
             rustc --version
@@ -330,9 +314,7 @@ jobs:
         with:
           image: ${{ steps.docker.outputs.IMAGE }}
           options: -v ${{ steps.docker.outputs.PNPM_STORE_PATH }}:${{ steps.docker.outputs.PNPM_STORE_PATH }} -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} --platform ${{ steps.docker.outputs.PLATFORM }}
-          run: |
-            npm install -g pnpm@10.7.0
-            pnpm test
+          run: npm run test
   test-wasi:
     name: Test WASI target
     needs:
