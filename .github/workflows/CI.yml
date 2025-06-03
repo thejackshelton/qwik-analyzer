@@ -159,7 +159,7 @@ jobs:
         with:
           path: artifacts
       - name: Create npm directories
-        run: pnpm napi create-npm-dir -t ""
+        run: pnpm napi create-npm-dirs
       - name: Move artifacts
         run: pnpm artifacts
       - name: List packages
