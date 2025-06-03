@@ -1,6 +1,6 @@
 {
 	"name": "@jackshelton/qwik-analyzer",
-	"version": "0.1.9",
+	"version": "0.1.10",
 	"main": "src/vite/plugin.ts",
 	"types": "src/vite/plugin.ts",
 	"packageManager": "pnpm@10.7.0",
