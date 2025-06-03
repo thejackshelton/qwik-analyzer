@@ -36,9 +36,9 @@
 		"version": "napi version"
 	},
 	"optionalDependencies": {
-		"@thejackshelton/qwik-analyzer-win32-x64-msvc": "0.1.8",
-		"@thejackshelton/qwik-analyzer-darwin-x64": "0.1.8",
-		"@thejackshelton/qwik-analyzer-linux-x64-gnu": "0.1.8",
-		"@thejackshelton/qwik-analyzer-darwin-arm64": "0.1.8"
+		"@jackshelton/qwik-analyzer-win32-x64-msvc": "0.1.8",
+		"@jackshelton/qwik-analyzer-darwin-x64": "0.1.8",
+		"@jackshelton/qwik-analyzer-linux-x64-gnu": "0.1.8",
+		"@jackshelton/qwik-analyzer-darwin-arm64": "0.1.8"
 	}
 }

@@ -14,14 +14,16 @@ A high-performance Rust-based build-time analyzer for Qwik applications. This to
 
 ```bash
 # npm
-npm install qwik-analyzer
+npm install @jackshelton/qwik-analyzer
 
 # pnpm
-pnpm add qwik-analyzer
+pnpm add @jackshelton/qwik-analyzer
 
 # yarn
-yarn add qwik-analyzer
+yarn add @jackshelton/qwik-analyzer
 ```
+
+> The @jackshelton scope is needed because napi-rs makes scopes required for publishing.
 
 ## Usage
 
@@ -32,7 +34,7 @@ Add the qwik-analyzer plugin to your Vite configuration:
 ```typescript
 // vite.config.ts
 import { defineConfig } from 'vite';
-import qwikAnalyzer from 'qwik-analyzer';
+import qwikAnalyzer from '@jackshelton/qwik-analyzer';
 
 export default defineConfig({
   plugins: [
@@ -50,7 +52,7 @@ Use the `isComponentPresent` function to conditionally render or execute code ba
 
 ```tsx
 import { component$ } from '@builder.io/qwik';
-import { isComponentPresent } from 'qwik-analyzer';
+import { isComponentPresent } from '@jackshelton/qwik-analyzer';
 import { MyComponent } from './my-component';
 import { AnotherComponent } from './another-component';
 
@@ -106,7 +108,7 @@ Checks if a component is present in the current component tree. This function is
 
 ```typescript
 // utils/feature-flags.ts
-import { isComponentPresent } from 'qwik-analyzer';
+import { isComponentPresent } from '@jackshelton/qwik-analyzer';
 import { AdvancedEditor } from '../components/advanced-editor';
 import { SimpleEditor } from '../components/simple-editor';
 
