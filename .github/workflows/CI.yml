@@ -157,6 +157,8 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+      - name: Create npm directories
+        run: pnpm napi create-npm-dir -t ""
       - name: Move artifacts
         run: pnpm artifacts
       - name: List packages
