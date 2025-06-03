@@ -7,16 +7,20 @@
 	"napi": {
 		"name": "qwik-analyzer",
 		"triples": {
-			"additional": ["aarch64-apple-darwin", "x86_64-pc-windows-msvc"]
+			"additional": [
+				"aarch64-apple-darwin",
+				"x86_64-pc-windows-msvc"
+			]
 		}
 	},
 	"license": "MIT",
 	"devDependencies": {
 		"@napi-rs/cli": "^2.18.4",
-		"vitest": "^3.2.0",
 		"@types/node": "^22.0.0",
+		"bumpp": "^10.1.1",
 		"typescript": "^5.0.0",
-		"vite": "^6.3.5"
+		"vite": "^6.3.5",
+		"vitest": "^3.2.0"
 	},
 	"engines": {
 		"node": ">= 10"
