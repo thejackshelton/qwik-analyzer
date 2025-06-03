@@ -169,7 +169,7 @@ jobs:
         run: |
           if [[ $GITHUB_EVENT_NAME == "workflow_dispatch" ]]; then
             echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
-            pnpm bumpp --patch --commit --tag --push
+            pnpm bumpp --patch --yes --commit --tag --push
             pnpm publish --access public --no-git-checks
           else
             echo "Skipping publish - not a manual release"

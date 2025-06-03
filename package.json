@@ -1,5 +1,5 @@
 {
-	"name": "qwik-analyzer",
+	"name": "@thejackshelton/qwik-analyzer",
 	"version": "0.1.7",
 	"main": "src/vite/plugin.ts",
 	"types": "src/vite/plugin.ts",
@@ -7,10 +7,7 @@
 	"napi": {
 		"name": "qwik-analyzer",
 		"triples": {
-			"additional": [
-				"aarch64-apple-darwin",
-				"x86_64-pc-windows-msvc"
-			]
+			"additional": ["aarch64-apple-darwin", "x86_64-pc-windows-msvc"]
 		}
 	},
 	"license": "MIT",
