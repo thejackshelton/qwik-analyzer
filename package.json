@@ -1,6 +1,6 @@
 {
 	"name": "@jackshelton/qwik-analyzer",
-	"version": "0.1.8",
+	"version": "0.1.9",
 	"main": "src/vite/plugin.ts",
 	"types": "src/vite/plugin.ts",
 	"packageManager": "pnpm@10.7.0",
@@ -40,6 +40,6 @@
 		"test": "vitest run",
 		"universal": "napi universal",
 		"version": "napi version",
-		"bump": "pnpm bumpp --patch --yes --commit --tag --push"
+		"bump": "pnpm bumpp"
 	}
 }
