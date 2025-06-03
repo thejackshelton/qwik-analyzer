@@ -170,6 +170,7 @@ jobs:
           if [[ $GITHUB_EVENT_NAME == "workflow_dispatch" ]]; then
             echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
             pnpm bumpp --patch --yes --commit --tag --push
+            pnpm napi prepublish -t npm --skip-gh-release
           else
             echo "Skipping publish - not a manual release"
           fi
