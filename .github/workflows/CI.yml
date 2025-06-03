@@ -171,7 +171,7 @@ jobs:
             echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
             echo "Current version after bump:"
             cat package.json | grep '"version"'
-            pnpm napi prepublish -t npm --skip-gh-release
+            pnpm napi prepublish -t npm
             pnpm publish --access public --no-git-checks --ignore-scripts
           else
             echo "Skipping publish - not a manual release"
