@@ -8,17 +8,20 @@
 		"access": "public"
 	},
 	"napi": {
-		"binaryName": "qwik-analyzer",
-		"packageName": "@jackshelton/qwik-analyzer",
-		"targets": [
-			"x86_64-apple-darwin",
-			"aarch64-apple-darwin",
-			"x86_64-pc-windows-msvc"
-		]
+		"name": "qwik-analyzer",
+		"npmName": "@jackshelton/qwik-analyzer",
+		"triples": {
+			"defaults": false,
+			"additional": [
+				"x86_64-apple-darwin",
+				"aarch64-apple-darwin",
+				"x86_64-pc-windows-msvc"
+			]
+		}
 	},
 	"license": "MIT",
 	"devDependencies": {
-		"@napi-rs/cli": "3.0.0-alpha.82",
+		"@napi-rs/cli": "^2.18.4",
 		"@types/node": "^22.0.0",
 		"bumpp": "^10.1.1",
 		"typescript": "^5.0.0",
