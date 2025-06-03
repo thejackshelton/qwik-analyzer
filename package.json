@@ -9,6 +9,7 @@
 	},
 	"napi": {
 		"name": "qwik-analyzer",
+		"npmName": "@jackshelton/qwik-analyzer",
 		"triples": {
 			"additional": ["aarch64-apple-darwin", "x86_64-pc-windows-msvc"]
 		}
