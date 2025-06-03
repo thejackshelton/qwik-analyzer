@@ -168,6 +168,7 @@ jobs:
       - name: Publish packages
         run: |
           if [[ $GITHUB_EVENT_NAME == "workflow_dispatch" ]]; then
+            echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
             echo "Current version after bump:"
             cat package.json | grep '"version"'
             pnpm napi prepublish -t npm --skip-gh-release
