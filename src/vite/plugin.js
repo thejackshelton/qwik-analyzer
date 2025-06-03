@@ -1,6 +1,8 @@
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { createRequire } from "node:module";
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
 let isDebugMode = false;
 export function debug(message) {
     if (isDebugMode) {
@@ -25,8 +27,7 @@ class NAPIWrapper {
         try {
             // Resolve path to index.js relative to this plugin file
             const indexPath = resolve(__dirname, "../../index.js");
-            const importFn = new Function("specifier", "return import(specifier)");
-            const napiModule = await importFn(indexPath);
+            const napiModule = require(indexPath);
             debug("NAPI module loaded successfully");
             return napiModule;
         }
