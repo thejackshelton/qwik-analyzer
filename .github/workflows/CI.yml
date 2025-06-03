@@ -172,6 +172,7 @@ jobs:
             echo "Current version after bump:"
             cat package.json | grep '"version"'
             pnpm napi prepublish -t npm --skip-gh-release
+            pnpm publish --access public --no-git-checks
           else
             echo "Skipping publish - not a manual release"
           fi
