@@ -1,6 +1,6 @@
 {
 	"name": "@jackshelton/qwik-analyzer",
-	"version": "0.1.16",
+	"version": "0.1.17",
 	"type": "module",
 	"main": "src/vite/plugin.js",
 	"types": "src/vite/plugin.d.ts",
