@@ -15,16 +15,13 @@
 		"access": "public"
 	},
 	"napi": {
-		"name": "qwik-analyzer",
-		"npmName": "@jackshelton/qwik-analyzer",
-		"triples": {
-			"defaults": false,
-			"additional": [
-				"x86_64-apple-darwin",
-				"aarch64-apple-darwin",
-				"x86_64-pc-windows-msvc"
-			]
-		}
+		"binaryName": "qwik-analyzer",
+		"packageName": "@jackshelton/qwik-analyzer",
+		"targets": [
+			"x86_64-apple-darwin",
+			"aarch64-apple-darwin",
+			"x86_64-pc-windows-msvc"
+		]
 	},
 	"license": "MIT",
 	"devDependencies": {
@@ -44,7 +41,7 @@
 		"build": "tsc && napi build --platform --release --esm",
 		"build:cross": "napi build --platform --release --target --esm",
 		"build:debug": "napi build --platform --esm",
-		"prepublishOnly": "napi prepublish -t npm --esm && tsc",
+		"prepublishOnly": "tsc",
 		"test": "vitest run",
 		"universal": "napi universal",
 		"version": "napi version",
