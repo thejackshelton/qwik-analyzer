@@ -39,6 +39,7 @@
 		"prepublishOnly": "napi prepublish -t npm",
 		"test": "vitest run",
 		"universal": "napi universal",
-		"version": "napi version"
+		"version": "napi version",
+		"bump": "pnpm bumpp --patch --yes --commit --tag --push"
 	}
 }
