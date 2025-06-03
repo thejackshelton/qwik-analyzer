@@ -159,8 +159,6 @@ jobs:
           path: artifacts
       - name: Move artifacts
         run: pnpm artifacts
-      - name: create npm dirs
-        run: pnpm napi create-npm-dir
       - name: List packages
         run: ls -R ./npm
         shell: bash
