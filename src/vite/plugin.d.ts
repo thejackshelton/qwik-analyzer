@@ -1,6 +1,6 @@
 import type { PluginOption } from "vite";
 interface QwikAnalyzerOptions {
-	debug?: boolean;
+    debug?: boolean;
 }
 export declare function debug(message: string): void;
 /**
@@ -11,11 +11,6 @@ export declare function debug(message: string): void;
  * @param injectedValue - Optional boolean value injected by qwik-analyzer at build time
  * @returns boolean indicating if the component is present
  */
-export declare function isComponentPresent<T>(
-	component: unknown,
-	injectedValue?: boolean,
-): boolean;
-export default function qwikAnalyzer(
-	options?: QwikAnalyzerOptions,
-): PluginOption;
+export declare function isComponentPresent<T>(component: unknown, injectedValue?: boolean): boolean;
+export default function qwikAnalyzer(options?: QwikAnalyzerOptions): PluginOption;
 export {};
