@@ -163,16 +163,22 @@ const HTML_TAGS: phf::Set<&'static str> = phf_set![
 pub fn extract_imported_jsx_components(semantic: &Semantic) -> Vec<String> {
   let mut components = HashSet::new();
 
+  debug(&format!("🔍 Starting JSX component extraction"));
+
   for node in semantic.nodes().iter() {
     let AstKind::JSXOpeningElement(jsx_opening) = node.kind() else {
       continue;
     };
 
     let Some(element_name) = extract_jsx_element_name(jsx_opening) else {
+      debug(&format!("🔍 Found JSX element but could not extract name"));
       continue;
     };
 
+    debug(&format!("🔍 Found JSX element: {}", element_name));
+
     if element_name.contains('.') {
+      debug(&format!("🔍 Processing member component: {}", element_name));
       if let Some(full_component) = parse_member_component(&element_name) {
         if components.insert(full_component.clone()) {
           debug(&format!("🏷️ Found imported component: {}", full_component));
@@ -181,11 +187,15 @@ pub fn extract_imported_jsx_components(semantic: &Semantic) -> Vec<String> {
       continue;
     }
 
+    debug(&format!("🔍 Checking if {} is component name", element_name));
     if is_component_name(&element_name) && components.insert(element_name.clone()) {
       debug(&format!("🏷️ Found imported component: {}", element_name));
+    } else {
+      debug(&format!("🔍 {} is not a valid component name", element_name));
     }
   }
 
+  debug(&format!("🔍 Finished JSX component extraction, found {} components", components.len()));
   components.into_iter().collect()
 }
 

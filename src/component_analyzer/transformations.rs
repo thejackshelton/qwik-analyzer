@@ -4,6 +4,7 @@ use oxc_span::GetSpan;
 use std::path::Path;
 
 use crate::component_analyzer::jsx_analysis::extract_jsx_element_name;
+use crate::component_analyzer::import_resolver::{find_import_source_for_component, resolve_import_path, resolve_component_from_index};
 use crate::component_analyzer::utils::{
   debug, extract_component_name_from_argument, extract_function_name, ComponentPresenceCall,
 };
@@ -12,12 +13,13 @@ use crate::{Result, Transformation};
 pub fn transform_file(
   semantic: &Semantic,
   component_calls: &Vec<ComponentPresenceCall>,
+  current_file: &Path,
 ) -> Result<Vec<Transformation>> {
   let mut transformations = Vec::new();
 
   for call in component_calls {
     if call.is_present_in_subtree {
-      let current_file_transformations = generate_jsx_prop_transformations(semantic, &call)?;
+      let current_file_transformations = generate_jsx_prop_transformations(semantic, &call, current_file)?;
       transformations.extend(current_file_transformations);
     }
   }
@@ -28,17 +30,13 @@ pub fn transform_file(
 fn generate_jsx_prop_transformations(
   semantic: &Semantic,
   call: &ComponentPresenceCall,
+  current_file: &Path,
 ) -> Result<Vec<Transformation>> {
   let mut transformations = Vec::new();
 
-  let source_file_name = Path::new(&call.source_file)
-    .file_stem()
-    .and_then(|s| s.to_str())
-    .unwrap_or("");
-
   debug(&format!(
-    "🔍 Looking for JSX component corresponding to source file: {} ({})",
-    call.source_file, source_file_name
+    "🔍 Looking for JSX component corresponding to source file: {}",
+    call.source_file
   ));
 
   for node in semantic.nodes().iter() {
@@ -50,9 +48,23 @@ fn generate_jsx_prop_transformations(
       continue;
     };
 
-    if !should_add_prop_to_component(&element_name, source_file_name) {
+    debug(&format!(
+      "🔍 Found JSX element: {} - checking if it resolves to component with isComponentPresent call in {}",
+      element_name, call.source_file
+    ));
+
+    if !jsx_element_resolves_to_source_file(semantic, &element_name, &call.source_file, current_file)? {
+      debug(&format!(
+        "❌ JSX element {} does NOT resolve to source file {}",
+        element_name, call.source_file
+      ));
       continue;
     }
+
+    debug(&format!(
+      "✅ JSX element {} SHOULD receive props for source file {}",
+      element_name, call.source_file
+    ));
 
     debug(&format!(
       "🔧 Adding prop to JSX component: {}",
@@ -77,13 +89,113 @@ fn generate_jsx_prop_transformations(
   Ok(transformations)
 }
 
-fn should_add_prop_to_component(element_name: &str, source_file_name: &str) -> bool {
-  element_name
-    .split('.')
-    .last()
-    .unwrap_or(element_name)
-    .to_lowercase()
-    == source_file_name
+fn jsx_element_resolves_to_source_file(
+  semantic: &Semantic,
+  element_name: &str,
+  target_source_file: &str,
+  current_file: &Path,
+) -> Result<bool> {
+  // For namespaced components like MyTest.Root, resolve the actual component file
+  if element_name.contains('.') {
+    let parts: Vec<&str> = element_name.split('.').collect();
+    if parts.len() != 2 {
+      return Ok(false);
+    }
+
+    let module_name = parts[0];
+    let component_name = parts[1];
+
+    // Find the import source for the module
+    let Some(import_source) = find_import_source_for_component(semantic, module_name) else {
+      return Ok(false);
+    };
+
+    // Use the passed current_file for import resolution
+
+    // Resolve the import path to get the module directory
+    let module_path = resolve_import_path(&import_source, current_file)
+      .map_err(|_| "Could not resolve import path")?;
+
+    // Use oxc semantic to analyze the index file and find the export for this component
+    if let Ok(component_file) = resolve_component_from_index(&module_path, component_name) {
+      debug(&format!(
+        "🔍 Resolved JSX component {} to file: {}",
+        element_name, component_file
+      ));
+      debug(&format!(
+        "🔍 Comparing with target source file: {}",
+        target_source_file
+      ));
+      
+      // Compare the resolved component file with the target source file
+      let component_path = Path::new(&component_file);
+      let target_path = Path::new(target_source_file);
+      
+      // Use canonical paths if possible, otherwise compare as strings
+      match (component_path.canonicalize(), target_path.canonicalize()) {
+        (Ok(comp_canonical), Ok(target_canonical)) => {
+          let matches = comp_canonical == target_canonical;
+          debug(&format!(
+            "🔍 Canonical path comparison: {} == {} -> {}",
+            comp_canonical.display(), target_canonical.display(), matches
+          ));
+          return Ok(matches);
+        }
+        _ => {
+          // Fallback to string comparison
+          let matches = component_file == target_source_file;
+          debug(&format!(
+            "🔍 String comparison fallback: {} == {} -> {}",
+            component_file, target_source_file, matches
+          ));
+          return Ok(matches);
+        }
+      }
+    } else {
+      debug(&format!(
+        "🔍 Could not find component file for {} in module {}",
+        component_name, module_path
+      ));
+    }
+  } else {
+    // For simple components, try to resolve directly
+    let Some(import_source) = find_import_source_for_component(semantic, element_name) else {
+      return Ok(false);
+    };
+
+    // Use the passed current_file for import resolution
+
+    if let Ok(resolved_path) = resolve_import_path(&import_source, current_file) {
+      debug(&format!(
+        "🔍 Resolved JSX component {} to file: {}",
+        element_name, resolved_path
+      ));
+      
+      let resolved_path_obj = Path::new(&resolved_path);
+      let target_path = Path::new(target_source_file);
+      
+      match (resolved_path_obj.canonicalize(), target_path.canonicalize()) {
+        (Ok(resolved_canonical), Ok(target_canonical)) => {
+          let matches = resolved_canonical == target_canonical;
+          debug(&format!(
+            "🔍 Path comparison: {} == {} -> {}",
+            resolved_canonical.display(), target_canonical.display(), matches
+          ));
+          return Ok(matches);
+        }
+        _ => {
+          let matches = resolved_path == target_source_file;
+          debug(&format!(
+            "🔍 String comparison: {} == {} -> {}",
+            resolved_path, target_source_file, matches
+          ));
+          return Ok(matches);
+        }
+      }
+    }
+  }
+
+  Ok(false)
 }
 
 pub fn transform_components(semantic: &Semantic, file_path: &Path) -> Result<Vec<Transformation>> {

@@ -2,7 +2,7 @@ use oxc_semantic::Semantic;
 use std::path::Path;
 
 use crate::component_analyzer::import_resolver::{
-  file_has_component, find_calls_in_file, find_component_file_in_module,
+  file_has_component, find_calls_in_file, resolve_component_from_index,
   find_import_source_for_component, resolve_import_path,
 };
 use crate::component_analyzer::jsx_analysis::extract_imported_jsx_components;
@@ -43,10 +43,16 @@ pub fn find_presence_calls(
       module_name, module_dir
     ));
 
-    let component_file = find_component_file_in_module(&module_dir, component_name)?;
-    debug(&format!("📂 Found component file: {}", component_file));
-
-    return find_calls_in_file(&component_file);
+    debug(&format!("📂 About to scan module {} for component {}", module_dir, component_name));
+    
+    debug(&format!("🔍 Trying resolve_component_from_index for {} in {}", component_name, module_dir));
+    if let Ok(component_file) = resolve_component_from_index(&module_dir, component_name) {
+      debug(&format!("📂 Found component file: {}", component_file));
+      return find_calls_in_file(&component_file);
+    } else {
+      debug(&format!("📂 No direct component file found, scanning entire module: {}", module_dir));
+      return find_calls_in_module(&module_dir);
+    }
   }
 
   let Some(import_source) = find_import_source_for_component(semantic, jsx_component) else {
@@ -93,6 +99,11 @@ pub fn has_component(
     if jsx_component.ends_with(&format!(".{}", component_name)) {
       continue;
     }
+    
+    if jsx_component.contains('.') && component_name.contains(&jsx_component.split('.').last().unwrap_or("")) {
+      debug(&format!("✅ Found potential match: {} contains {}", jsx_component, component_name));
+      return Ok(true);
+    }
 
     let Some(import_source) = find_import_source_for_component(semantic, &jsx_component) else {
       continue;
@@ -134,4 +145,39 @@ pub fn has_component(
     component_name
   ));
   Ok(false)
+}
+
+fn find_calls_in_module(module_path: &str) -> Result<Vec<ComponentPresenceCall>> {
+  use std::fs;
+  use oxc_span::VALID_EXTENSIONS;
+  
+  let mut all_calls = Vec::new();
+  
+  let module_dir = if module_path.ends_with(".ts") || module_path.ends_with(".tsx") || 
+                     module_path.ends_with(".js") || module_path.ends_with(".jsx") {
+    Path::new(module_path).parent().ok_or("Could not get module directory")?
+  } else {
+    Path::new(module_path)
+  };
+  
+  debug(&format!("🔍 Scanning directory: {}", module_dir.display()));
+  
+  if let Ok(entries) = fs::read_dir(module_dir) {
+    for entry in entries.flatten() {
+      let path = entry.path();
+      if path.is_file() {
+        if let Some(extension) = path.extension() {
+          if VALID_EXTENSIONS.iter().any(|&ext| ext == extension.to_str().unwrap_or("")) {
+            let file_path = path.to_string_lossy().to_string();
+            debug(&format!("📄 Checking file: {}", file_path));
+            if let Ok(calls) = find_calls_in_file(&file_path) {
+              all_calls.extend(calls);
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  Ok(all_calls)
 }

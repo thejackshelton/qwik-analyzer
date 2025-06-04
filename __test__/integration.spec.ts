@@ -45,9 +45,41 @@ const testCases: TestCase[] = [
 			"Should return false - contains DummyComp.Description but not within DummyComp.Root",
 		moduleSpecifier: "../components/dummy-comp",
 	},
+	{
+		name: "Aliased Example",
+		file: "../qwik-app/src/examples/aliased_example.tsx",
+		expectedHasComponent: true,
+		description:
+			"Should detect aliased DummyComp.Description within DummyComp.Root",
+		moduleSpecifier: "../components/dummy-comp",
+	},
+	{
+		name: "Checkbox Example",
+		file: "../qwik-app/src/examples/checkbox.tsx",
+		expectedHasComponent: true,
+		description:
+			"Should detect DummyComp.Description (contains Checkbox.Description which matches)",
+		moduleSpecifier: "../components/dummy-comp",
+	},
+	{
+		name: "Slot Example",
+		file: "../qwik-app/src/examples/slot_example.tsx",
+		expectedHasComponent: true,
+		description:
+			"Should return true - MyTest.Root contains isComponentPresent call for MyTestChild",
+		moduleSpecifier: "../components/my-test",
+	},
 ];
 
 describe("qwik-analyzer integration tests", () => {
+	it("Slot Example - MyTest.Child detection: Should return true - MyTest.Root contains isComponentPresent call for MyTestChild", async () => {
+		const filePath = path.resolve(__dirname, "../qwik-app/src/examples/slot_example.tsx");
+
+		expect(fs.existsSync(filePath)).toBe(true);
+
+		const result = await analyzeFile(filePath, "../components/my-test", "MyTestChild");
+		expect(result.hasComponent).toBe(true);
+	});
 	for (const testCase of testCases) {
 		it(`${testCase.name}: ${testCase.description}`, async () => {
 			const filePath = path.resolve(__dirname, testCase.file);

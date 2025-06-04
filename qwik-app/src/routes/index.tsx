@@ -4,6 +4,7 @@ import IndirectExample from "../examples/indirect_example";
 import DirectExample from "../examples/direct_example";
 import AliasExample from "../examples/aliased_example";
 import CheckboxExample from "../examples/checkbox";
+import SlotExample from "../examples/slot_example";
 
 export default component$(() => {
 	return <CheckboxExample />;

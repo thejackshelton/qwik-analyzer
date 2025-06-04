@@ -80,7 +80,7 @@ pub fn analyze_code_with_semantics(source_text: &str, file_path: &Path) -> Resul
   }
 
   if has_any_component {
-    let current_file_transformations = transform_file(semantic, &all_component_calls)?;
+    let current_file_transformations = transform_file(semantic, &all_component_calls, file_path)?;
     transformations.extend(current_file_transformations);
   }
 

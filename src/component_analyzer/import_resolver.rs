@@ -100,45 +100,89 @@ pub fn resolve_import_path(import_source: &str, current_file: &Path) -> Result<S
   }
 }
 
-pub fn find_component_file_in_module(module_dir: &str, component_name: &str) -> Result<String> {
-  let module_path = Path::new(module_dir);
+pub fn resolve_component_from_index(index_file_path: &str, component_name: &str) -> Result<String> {
+  debug(&format!(
+    "🔍 Using oxc to resolve {} from index file: {}",
+    component_name, index_file_path
+  ));
 
-  let actual_module_dir = if is_index_file(module_dir) {
-    module_path
-      .parent()
-      .ok_or("Could not get module parent directory")?
-  } else {
-    module_path
-  };
+  let source_text = fs::read_to_string(index_file_path)?;
+  let allocator = Allocator::default();
+  let source_type = SourceType::from_path(Path::new(index_file_path)).unwrap_or_default();
 
-  let component_file_name = component_name.to_lowercase();
+  let oxc_parser::ParserReturn {
+    program, errors, ..
+  } = oxc_parser::Parser::new(&allocator, &source_text, source_type).parse();
 
-  for ext in VALID_EXTENSIONS {
-    let component_file = actual_module_dir.join(format!("{}.{}", component_file_name, ext));
-    if component_file.exists() {
-      debug(&format!(
-        "📂 Found component file: {}",
-        component_file.display()
-      ));
-      return Ok(component_file.to_string_lossy().to_string());
+  if !errors.is_empty() {
+    return Err("Failed to parse index file".into());
+  }
+
+  let semantic_ret = oxc_semantic::SemanticBuilder::new().build(&program);
+  let semantic = &semantic_ret.semantic;
+
+  // Look for object export pattern: export const MyTest = { Root: MyTestRoot, Child: MyTestChild }
+  for node in semantic.nodes().iter() {
+    match node.kind() {
+      // Handle re-export pattern: export { MyTestRoot as Root } from "./my-test-root"
+      AstKind::ExportNamedDeclaration(export_decl) => {
+        for specifier in &export_decl.specifiers {
+          let exported_name = &specifier.exported.name();
+          if exported_name == component_name {
+            if let Some(source) = &export_decl.source {
+              debug(&format!(
+                "📂 Found re-export {} from source: {}",
+                component_name, source.value
+              ));
+              
+              let index_file = Path::new(index_file_path);
+              return resolve_import_path(&source.value, index_file);
+            }
+          }
+        }
+      }
+      
+      // Handle object export pattern: export const MyTest = { Root: MyTestRoot, Child: MyTestChild }
+      AstKind::VariableDeclarator(declarator) => {
+        // Check if this variable has an object expression as init
+        if let Some(oxc_ast::ast::Expression::ObjectExpression(obj_expr)) = &declarator.init {
+          // Look through object properties for our component
+          for prop in &obj_expr.properties {
+            if let oxc_ast::ast::ObjectPropertyKind::ObjectProperty(obj_prop) = prop {
+              if let oxc_ast::ast::PropertyKey::StaticIdentifier(key) = &obj_prop.key {
+                if key.name == component_name {
+                  // Found the property! Get the value which should be an identifier
+                  if let oxc_ast::ast::Expression::Identifier(value_ident) = &obj_prop.value {
+                    let import_name = &value_ident.name;
+                    debug(&format!(
+                      "📂 Found object property {} maps to identifier: {}",
+                      component_name, import_name
+                    ));
+                    
+                    // Find the import for this identifier in the same file
+                    if let Some(import_source) = find_import_source_for_component(semantic, import_name) {
+                      debug(&format!(
+                        "📂 Found import source for {}: {}",
+                        import_name, import_source
+                      ));
+                      
+                      let index_file = Path::new(index_file_path);
+                      return resolve_import_path(&import_source, index_file);
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      _ => {}
     }
   }
 
-  Err(
-    format!(
-      "Could not find component file for {} in {}",
-      component_name,
-      actual_module_dir.display()
-    )
-    .into(),
-  )
+  Err(format!("Could not find component {} in index file", component_name).into())
 }
 
-fn is_index_file(path: &str) -> bool {
-  VALID_EXTENSIONS
-    .iter()
-    .any(|ext| path.ends_with(&format!("index.{}", ext)))
-}
 
 pub fn find_calls_in_file(file_path: &str) -> Result<Vec<ComponentPresenceCall>> {
   let source_text = fs::read_to_string(file_path)?;
