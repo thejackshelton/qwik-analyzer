@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { analyzeFile } from "../index.js";
+import { analyzeFile } from "../index.cjs";
 
 test("direct example analysis", () => {
 	console.log("Testing direct example that contains Description...");

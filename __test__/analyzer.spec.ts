@@ -1,5 +1,5 @@
 import { test, expect, describe } from "vitest";
-import { analyzeFile } from "../index.js";
+import { analyzeFile } from "../index.cjs";
 
 describe("New semantic analysis approach", () => {
 	test("should analyze root component with isComponentPresent call", async () => {

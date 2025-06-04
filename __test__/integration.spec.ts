@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { analyzeFile, analyzeFileChanged } from "../index.js";
+import { analyzeFile, analyzeFileChanged } from "../index.cjs";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

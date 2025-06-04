@@ -1,5 +1,5 @@
 import { test, expect, beforeAll, afterAll } from "vitest";
-import { analyzeAndTransformCode } from "../index.js";
+import { analyzeAndTransformCode } from "../index.cjs";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
