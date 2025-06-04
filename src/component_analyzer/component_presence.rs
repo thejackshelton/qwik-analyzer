@@ -184,7 +184,14 @@ pub fn has_component(
       jsx_component, resolved_path, component_name
     ));
 
-    let presence_calls = find_calls_in_file(&resolved_path)?;
+    let presence_calls = match find_calls_in_file(&resolved_path) {
+      Ok(calls) => calls,
+      Err(e) => {
+        debug(&format!("⚠️ Failed to find calls in {}: {}, continuing with recursive analysis", resolved_path, e));
+        Vec::new()
+      }
+    };
+    debug(&format!("📋 Found {} presence calls in {}", presence_calls.len(), resolved_path));
     for call in &presence_calls {
       if call.component_name == component_name {
         debug(&format!(
@@ -193,6 +200,16 @@ pub fn has_component(
         ));
         return Ok(true);
       }
+    }
+
+    // NEW: Always check JSX content recursively using oxc semantic APIs
+    debug(&format!("🔄 About to analyze JSX content in {} for {}", resolved_path, component_name));
+    if analyze_jsx_content_in_component_file(&resolved_path, component_name)? {
+      debug(&format!(
+        "✅ Found {} via JSX content in imported component {}",
+        component_name, jsx_component
+      ));
+      return Ok(true);
     }
 
     if presence_calls.is_empty() {
@@ -348,5 +365,191 @@ fn component_file_defines_component(component_file: &str, component_name: &str) 
   }
   
   debug(&format!("❌ Component {} not found in {}", component_name, component_file));
+  Ok(false)
+}
+
+/// Analyzes JSX content in a component file to find if it contains the target component
+/// Uses oxc semantic analysis to properly resolve JSX member expressions
+fn analyze_jsx_content_in_component_file(
+  component_file: &str,
+  target_component: &str,
+) -> Result<bool> {
+  debug(&format!(
+    "🔍 Analyzing JSX content in {} for target component {}",
+    component_file, target_component
+  ));
+
+  // Parse the component file using oxc
+  let source_text = std::fs::read_to_string(component_file)?;
+  let allocator = Allocator::default();
+  let source_type = SourceType::from_path(Path::new(component_file)).unwrap_or_default();
+
+  let oxc_parser::ParserReturn { program, errors, .. } = 
+    oxc_parser::Parser::new(&allocator, &source_text, source_type).parse();
+
+  if !errors.is_empty() {
+    debug(&format!("❌ Failed to parse {}: {} errors", component_file, errors.len()));
+    return Ok(false);
+  }
+
+  let semantic_ret = oxc_semantic::SemanticBuilder::new().build(&program);
+  let semantic = &semantic_ret.semantic;
+
+  // Analyze JSX elements in this file
+  for node in semantic.nodes().iter() {
+    if let AstKind::JSXOpeningElement(jsx_opening) = node.kind() {
+      if let Some(jsx_element_name) = extract_jsx_element_name_enhanced(jsx_opening) {
+        debug(&format!("🔍 Found JSX element: {} in {}", jsx_element_name, component_file));
+        
+        // Check if this JSX element resolves to our target component
+        if jsx_element_resolves_to_target(&jsx_element_name, target_component, semantic, Path::new(component_file))? {
+          debug(&format!(
+            "✅ JSX element {} resolves to target component {}",
+            jsx_element_name, target_component
+          ));
+          return Ok(true);
+        }
+      }
+    }
+  }
+
+  debug(&format!("❌ No JSX content in {} resolves to {}", component_file, target_component));
+  Ok(false)
+}
+
+/// Enhanced JSX element name extraction with better member expression handling
+fn extract_jsx_element_name_enhanced(jsx_opening: &oxc_ast::ast::JSXOpeningElement) -> Option<String> {
+  use oxc_ast::ast::JSXElementName;
+  
+  match &jsx_opening.name {
+    JSXElementName::Identifier(ident) => Some(ident.name.to_string()),
+    JSXElementName::IdentifierReference(ident) => Some(ident.name.to_string()),
+    JSXElementName::MemberExpression(member_expr) => {
+      let object_name = extract_jsx_member_object_name_enhanced(&member_expr.object)?;
+      let property_name = &member_expr.property.name;
+      Some(format!("{}.{}", object_name, property_name))
+    }
+    _ => None,
+  }
+}
+
+fn extract_jsx_member_object_name_enhanced(
+  object: &oxc_ast::ast::JSXMemberExpressionObject,
+) -> Option<String> {
+  use oxc_ast::ast::JSXMemberExpressionObject;
+  
+  match object {
+    JSXMemberExpressionObject::IdentifierReference(ident) => Some(ident.name.to_string()),
+    JSXMemberExpressionObject::MemberExpression(member_expr) => {
+      let object_name = extract_jsx_member_object_name_enhanced(&member_expr.object)?;
+      let property_name = &member_expr.property.name;
+      Some(format!("{}.{}", object_name, property_name))
+    }
+    _ => None,
+  }
+}
+
+/// Check if a JSX element resolves to the target component using semantic analysis
+fn jsx_element_resolves_to_target(
+  jsx_element_name: &str,
+  target_component: &str,
+  semantic: &Semantic,
+  current_file: &Path,
+) -> Result<bool> {
+  debug(&format!(
+    "🔍 Checking if JSX element {} resolves to target {}",
+    jsx_element_name, target_component
+  ));
+
+  // Case 1: Direct match (e.g., "Description" == "Description")
+  if jsx_element_name == target_component {
+    debug(&format!("✅ Direct match: {} == {}", jsx_element_name, target_component));
+    return Ok(true);
+  }
+
+  // Case 2: Member expression resolution (e.g., "MyTest.Child" -> "MyTestChild")
+  if jsx_element_name.contains('.') && !target_component.contains('.') {
+    return resolve_member_expression_to_component(jsx_element_name, target_component, semantic, current_file);
+  }
+
+  // Case 3: Reverse resolution (e.g., "MyTestChild" used as "MyTest.Child")
+  if !jsx_element_name.contains('.') && target_component.contains('.') {
+    return resolve_simple_name_to_member_expression(jsx_element_name, target_component);
+  }
+
+  Ok(false)
+}
+
+/// Resolve member expression like "MyTest.Child" to component name like "MyTestChild"
+fn resolve_member_expression_to_component(
+  jsx_element_name: &str,
+  target_component: &str,
+  semantic: &Semantic,
+  current_file: &Path,
+) -> Result<bool> {
+  let parts: Vec<&str> = jsx_element_name.split('.').collect();
+  if parts.len() != 2 {
+    return Ok(false);
+  }
+
+  let namespace = parts[0];
+  let component_name = parts[1];
+
+  debug(&format!(
+    "🔍 Resolving member expression: {}.{} -> checking for {}",
+    namespace, component_name, target_component
+  ));
+
+  let Some(import_source) = find_import_source_for_component(semantic, namespace) else {
+    debug(&format!("❌ No import source found for namespace {}", namespace));
+    return Ok(false);
+  };
+
+  if is_external_import(&import_source, current_file) {
+    debug(&format!("❌ Skipping external import: {} from {}", namespace, import_source));
+    return Ok(false);
+  }
+
+  let Ok(module_path) = resolve_import_path(&import_source, current_file) else {
+    debug(&format!("❌ Failed to resolve import path for {}", import_source));
+    return Ok(false);
+  };
+
+  debug(&format!("📂 Resolved {} to module path: {}", namespace, module_path));
+
+  let module_dir = Path::new(&module_path);
+  let index_file = if module_dir.is_file() {
+    module_path.clone()
+  } else {
+    let index_ts = module_dir.join("index.ts");
+    let index_tsx = module_dir.join("index.tsx");
+    if index_ts.exists() {
+      index_ts.to_string_lossy().to_string()
+    } else if index_tsx.exists() {
+      index_tsx.to_string_lossy().to_string()
+    } else {
+      debug(&format!("❌ No index file found in {}", module_dir.display()));
+      return Ok(false);
+    }
+  };
+
+  if let Ok(component_file) = resolve_component_from_index(&index_file, component_name) {
+    debug(&format!("📂 Resolved {}.{} to component file: {}", namespace, component_name, component_file));
+    
+    return component_file_defines_component(&component_file, target_component);
+  }
+
+  debug(&format!("❌ Failed to resolve {}.{} through index file", namespace, component_name));
+  Ok(false)
+}
+
+fn resolve_simple_name_to_member_expression(
+  jsx_element_name: &str,
+  target_component: &str,
+) -> Result<bool> {
+  debug(&format!(
+    "🔍 Reverse resolution not yet implemented: {} -> {}",
+    jsx_element_name, target_component
+  ));
   Ok(false)
 }
