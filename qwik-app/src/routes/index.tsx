@@ -7,7 +7,7 @@ import CheckboxExample from "../examples/checkbox";
 import SlotExample from "../examples/slot_example";
 
 export default component$(() => {
-	return <CheckboxExample />;
+	return <SlotExample />;
 });
 
 export const head: DocumentHead = {

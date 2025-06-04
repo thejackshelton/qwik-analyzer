@@ -18,10 +18,9 @@ pub fn transform_file(
   let mut transformations = Vec::new();
 
   for call in component_calls {
-    if call.is_present_in_subtree {
-      let current_file_transformations = generate_jsx_prop_transformations(semantic, &call, current_file)?;
-      transformations.extend(current_file_transformations);
-    }
+    // Generate JSX props for all calls, not just the ones that are present
+    let current_file_transformations = generate_jsx_prop_transformations(semantic, &call, current_file)?;
+    transformations.extend(current_file_transformations);
   }
 
   Ok(transformations)
@@ -113,11 +112,36 @@ fn jsx_element_resolves_to_source_file(
     // Use the passed current_file for import resolution
 
     // Resolve the import path to get the module directory
-    let module_path = resolve_import_path(&import_source, current_file)
-      .map_err(|_| "Could not resolve import path")?;
+    let module_path = match resolve_import_path(&import_source, current_file) {
+      Ok(path) => path,
+      Err(_) => {
+        debug(&format!(
+          "❌ Could not resolve import path for {} - skipping external package",
+          import_source
+        ));
+        return Ok(false);
+      }
+    };
+
+    // Find the index file in the module directory
+    let module_path_obj = Path::new(&module_path);
+    let index_file = if module_path_obj.is_file() {
+      module_path.clone()
+    } else {
+      // Look for index.ts or index.tsx in the directory
+      let index_ts = module_path_obj.join("index.ts");
+      let index_tsx = module_path_obj.join("index.tsx");
+      if index_ts.exists() {
+        index_ts.to_string_lossy().to_string()
+      } else if index_tsx.exists() {
+        index_tsx.to_string_lossy().to_string()
+      } else {
+        module_path.clone() // Fallback to original behavior
+      }
+    };
 
     // Use oxc semantic to analyze the index file and find the export for this component
-    if let Ok(component_file) = resolve_component_from_index(&module_path, component_name) {
+    if let Ok(component_file) = resolve_component_from_index(&index_file, component_name) {
       debug(&format!(
         "🔍 Resolved JSX component {} to file: {}",
         element_name, component_file

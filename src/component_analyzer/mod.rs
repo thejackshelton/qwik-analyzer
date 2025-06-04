@@ -79,7 +79,8 @@ pub fn analyze_code_with_semantics(source_text: &str, file_path: &Path) -> Resul
     }
   }
 
-  if has_any_component {
+  // Apply JSX prop transformations for all component calls (both true and false)
+  if !all_component_calls.is_empty() {
     let current_file_transformations = transform_file(semantic, &all_component_calls, file_path)?;
     transformations.extend(current_file_transformations);
   }

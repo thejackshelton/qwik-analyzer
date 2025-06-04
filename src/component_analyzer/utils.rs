@@ -42,6 +42,15 @@ pub fn component_exists_in_jsx_with_path(
 
     if let Some(element_name) = extract_jsx_element_name(jsx_opening) {
       if element_name == component_name {
+        // For member expressions like Checkbox.Description, check if it's external
+        if element_name.contains('.') {
+          let parts: Vec<&str> = element_name.split('.').collect();
+          if parts.len() == 2 {
+            let namespace = parts[0];
+            // Only return true if the namespace can be resolved locally (not external)
+            return can_resolve_namespace_locally(semantic, namespace, current_file);
+          }
+        }
         return true;
       }
 
@@ -73,7 +82,13 @@ fn can_resolve_namespace_locally(
   };
 
   if let Some(import_source) = find_import_source_for_component(semantic, namespace) {
-    resolve_import_path(&import_source, current_file).is_ok()
+    match resolve_import_path(&import_source, current_file) {
+      Ok(resolved_path) => {
+        // Check if the resolved path contains node_modules (external package)
+        !resolved_path.contains("node_modules")
+      }
+      Err(_) => false,
+    }
   } else {
     false
   }

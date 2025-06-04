@@ -50,6 +50,8 @@ pub fn resolve_import_path(import_source: &str, current_file: &Path) -> Result<S
       .iter()
       .map(|ext| format!(".{}", ext).into())
       .collect(),
+    main_files: vec!["index".into()],
+    main_fields: vec!["main".into()],
     ..Default::default()
   };
 
