@@ -38,7 +38,7 @@ class NAPIWrapper {
 	private async loadModule(): Promise<NAPIModule> {
 		try {
 			const importFn = new Function("specifier", "return import(specifier)");
-			const napiModule = await importFn("../index.js");
+			const napiModule = await importFn("../index.cjs");
 			debug("NAPI module loaded successfully");
 			return napiModule;
 		} catch (error) {

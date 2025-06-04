@@ -35,7 +35,7 @@
 	"scripts": {
 		"dev": "pnpm -C ./qwik-app dev",
 		"artifacts": "napi artifacts",
-		"build": "tsc && napi build --platform --release",
+		"build": "tsc && napi build --platform --release --js index.cjs",
 		"build:cross": "napi build --platform --release --target",
 		"build:debug": "napi build --platform",
 		"prepublishOnly": "napi prepublish -t npm && tsc",
