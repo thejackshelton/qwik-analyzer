@@ -4,6 +4,15 @@
 	"type": "module",
 	"main": "src/vite/plugin.js",
 	"types": "src/vite/plugin.d.ts",
+	"exports": {
+		".": {
+			"types": "./src/vite/plugin.d.ts",
+			"default": "./src/vite/plugin.js"
+		},
+		"./napi": {
+			"default": "./index.cjs"
+		}
+	},
 	"packageManager": "pnpm@10.7.0",
 	"publishConfig": {
 		"access": "public"

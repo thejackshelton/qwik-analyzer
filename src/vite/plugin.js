@@ -21,8 +21,17 @@ class NAPIWrapper {
     async loadModule() {
         try {
             const importFn = new Function("specifier", "return import(specifier)");
+            try {
+                const napiModule = await importFn("@jackshelton/qwik-analyzer/napi");
+                debug("NAPI module loaded successfully from package export");
+                return napiModule;
+            }
+            catch (packageError) {
+                debug(`Failed to load from package export: ${packageError}`);
+            }
+            // for development
             const napiModule = await importFn("../index.cjs");
-            debug("NAPI module loaded successfully");
+            debug("NAPI module loaded successfully from relative path");
             return napiModule;
         }
         catch (error) {
