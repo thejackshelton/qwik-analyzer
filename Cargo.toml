@@ -6,18 +6,23 @@ version = "0.0.0"
 [lib]
 crate-type = ["cdylib"]
 
+[[bin]]
+name = "qwik-analyzer"
+path = "src/lib.rs"
+
 [dependencies]
 # Default enable napi4 feature, see https://nodejs.org/api/n-api.html#node-api-version-matrix
 napi = "2.16.17"
 napi-derive = "2.16.13"
-oxc_allocator = "0.72.1"
-oxc_ast = "0.72.1"
-oxc_parser = "0.72.1"
-oxc_semantic = "0.72.1"
-oxc_span = "0.72.1"
-oxc_syntax = "0.72.1"
-oxc_codegen = "0.72.1"
-oxc_transformer = "0.72.1"
+oxc_allocator = "0.72.2"
+oxc_ast = "0.72.2"
+oxc_parser = "0.72.2"
+oxc_semantic = "0.72.2"
+oxc_span = "0.72.2"
+oxc_syntax = "0.72.2"
+oxc_codegen = "0.72.2"
+oxc_transformer = "0.72.2"
+oxc_traverse = "0.72.2"
 oxc_resolver = "11.0.0"
 phf = { version = "0.11.3", features = ["macros"] }
 
