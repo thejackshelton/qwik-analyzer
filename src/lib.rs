@@ -9,6 +9,7 @@ struct ComponentInfo {
   pub found: bool,
 }
 
+
 struct QwikAnalyzer {
   found_components: Vec<ComponentInfo>,
 }
@@ -19,13 +20,9 @@ impl<'a> Traverse<'a> for QwikAnalyzer {
   }  
 }
 
-fn main() {
-
-
-  println!("HEYYYY {:?}", &analzyer);
-}
-
 #[napi]
-fn analyze_file(file_path: string) -> napi::Result<ComponentInfo> {
+fn transform_with_analysis(code: String, file_path: String) -> napi::Result<String> {
+  println!("Transforming: {}", file_path);
   
+  todo!("Implement actual transform logic");
 }

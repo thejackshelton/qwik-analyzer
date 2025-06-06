@@ -6,10 +6,6 @@ version = "0.0.0"
 [lib]
 crate-type = ["cdylib"]
 
-[[bin]]
-name = "qwik-analyzer"
-path = "src/lib.rs"
-
 [dependencies]
 # Default enable napi4 feature, see https://nodejs.org/api/n-api.html#node-api-version-matrix
 napi = "2.16.17"

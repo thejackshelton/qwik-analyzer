@@ -310,8 +310,6 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { analyzeFile, analyzeFileChanged, analyzeAndTransformCode } = nativeBinding
+const { transformWithAnalysis } = nativeBinding
 
-module.exports.analyzeFile = analyzeFile
-module.exports.analyzeFileChanged = analyzeFileChanged
-module.exports.analyzeAndTransformCode = analyzeAndTransformCode
+module.exports.transformWithAnalysis = transformWithAnalysis

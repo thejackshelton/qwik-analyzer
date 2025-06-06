@@ -5,7 +5,7 @@ interface QwikAnalyzerOptions {
 }
 
 interface NAPIModule {
-	analyzeAndTransformCode: (code: string, filePath: string) => string;
+	transformWithAnalysis: (code: string, filePath: string) => string;
 }
 
 let napiModule: NAPIModule | null = null;
@@ -15,7 +15,7 @@ async function getNAPIModule(): Promise<NAPIModule> {
 
 	try {
 		// @ts-expect-error - NAPI module has no TypeScript declarations
-		napiModule = await import("../../index.cjs");
+		napiModule = await import("../index.cjs");
 	} catch (error) {
 		throw new Error(`Failed to load NAPI module: ${error}`);
 	}
@@ -65,7 +65,7 @@ export default function qwikAnalyzer(
 
 			try {
 				const napi = await getNAPIModule();
-				const transformedCode = napi.analyzeAndTransformCode(code, cleanedId);
+				const transformedCode = napi.transformWithAnalysis(code, cleanedId);
 
 				return transformedCode !== code ? { code: transformedCode } : null;
 			} catch (error) {

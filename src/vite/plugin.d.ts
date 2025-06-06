@@ -2,7 +2,6 @@ import type { PluginOption } from "vite";
 interface QwikAnalyzerOptions {
     debug?: boolean;
 }
-export declare function debug(message: string): void;
 /**
  * Utility function to check if a component is present in the current component tree.
  * This function is analyzed at build time by qwik-analyzer.
