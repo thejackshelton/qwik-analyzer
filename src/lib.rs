@@ -1,10 +1,12 @@
+use napi_derive::napi;
 use oxc_ast::*;
 use oxc_traverse::{Ancestor, Traverse, TraverseCtx};
 
 #[derive(Debug)]
+#[napi(object)]
 struct ComponentInfo {
-  name: String,
-  found: bool,
+  pub name: String,
+  pub found: bool,
 }
 
 struct QwikAnalyzer {
@@ -21,4 +23,9 @@ fn main() {
 
 
   println!("HEYYYY {:?}", &analzyer);
+}
+
+#[napi]
+fn analyze_file(file_path: string) -> napi::Result<ComponentInfo> {
+  
 }
