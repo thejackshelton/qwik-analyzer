@@ -34,12 +34,13 @@ export default function qwikAnalyzer(options = {}) {
         enforce: "pre",
         async transform(code, id) {
             const cleanedId = id.split("?")[0];
-            if ((!cleanedId.endsWith(".tsx") && !cleanedId.endsWith(".ts")) ||
+            if ((!cleanedId.endsWith(".tsx") && !cleanedId.endsWith(".jsx")) ||
                 cleanedId.includes("node_modules")) {
                 return null;
             }
             try {
                 const napi = await getNAPIModule();
+                console.log("TRANSFORMING", cleanedId);
                 const transformedCode = napi.transformWithAnalysis(code, cleanedId);
                 return transformedCode !== code ? { code: transformedCode } : null;
             }
