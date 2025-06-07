@@ -4,7 +4,7 @@ async function getNAPIModule() {
         return napiModule;
     try {
         // @ts-expect-error - NAPI module has no TypeScript declarations
-        napiModule = await import("../../index.cjs");
+        napiModule = await import("../index.cjs");
     }
     catch (error) {
         throw new Error(`Failed to load NAPI module: ${error}`);
