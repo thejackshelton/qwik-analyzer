@@ -6,16 +6,15 @@ use oxc_span::SourceType;
 use oxc_parser::{ Parser, ParserReturn };
 use oxc_semantic::{ Semantic, SemanticBuilder, SemanticBuilderReturn };
 
-#[derive(Debug)]
-#[napi(object)]
-struct ComponentInfo {
-  pub name: String,
-  pub found: bool,
+struct RootComponent {
+  name: String,
+  presence_checks: Vec<String>,
+  found_components: Vec<String>
 }
 
 
 struct QwikAnalyzer {
-  found_components: Vec<ComponentInfo>,
+  root_components: Vec<RootComponent>,
 }
 
 impl<'a> Traverse<'a> for QwikAnalyzer {
@@ -37,7 +36,7 @@ fn transform_with_analysis(code: String, file_path: String) -> napi::Result<Stri
   } = SemanticBuilder::new().build(&program);
 
   let mut analyzer = QwikAnalyzer {
-    found_components: Vec::new()
+    root_components: Vec::new()
   };
 
   let scoping = semantic.into_scoping();
