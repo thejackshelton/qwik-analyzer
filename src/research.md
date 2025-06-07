@@ -422,7 +422,7 @@ import { Checkbox as MyCheckbox } from "@kunai-consulting/qwik"
 
 // Inside OtherComp (nested arbitrarily deep)
 function OtherComp() {
-  return <div><Checkbox.Child /></div>; // <-- Found it!
+  return <div><CheckboxChild /></div>; // <-- Found it!
 }
 ```
 
@@ -549,3 +549,333 @@ This approach provides comprehensive component presence analysis while leveragin
 - ✅ **Built-in formatting options** (quotes, comments, minification)
 - ✅ **No manual string building** or helper functions
 - ✅ **Semantic symbol resolution** handles all imports automatically
+
+## Testing Strategy for OXC Component Presence Analyzer
+
+### **1. Test Architecture Layers**
+
+#### **Unit Tests** (Rust `#[cfg(test)]`)
+Focus on individual analyzer components:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_component_resolution() {
+        // Test oxc_semantic symbol resolution
+    }
+    
+    #[test]
+    fn test_scope_traversal() {
+        // Test BFS scope tree navigation
+    }
+    
+    #[test]
+    fn test_jsx_extraction() {
+        // Test JSX component name extraction
+    }
+}
+```
+
+#### **Integration Tests** (TypeScript `.spec.ts`)
+Test the full pipeline like existing approach:
+
+### **2. Test Categories Based on Research**
+
+#### **A. Discovery Phase Tests**
+```typescript
+describe("Discovery Phase", () => {
+  test("finds isComponentPresent calls in root components", () => {
+    const code = `
+      function MyComponent() {
+        const hasChild = isComponentPresent(CheckboxChild);
+        return <div />;
+      }
+    `;
+    // Should identify MyComponent as root component
+  });
+  
+  test("handles multiple presence checks in same component", () => {
+    const code = `
+      function MyComponent() {
+        const hasChild = isComponentPresent(CheckboxChild);
+        const hasTitle = isComponentPresent(Title);
+        return <div />;
+      }
+    `;
+  });
+});
+```
+
+#### **B. Component Resolution Tests** (oxc_semantic)
+```typescript
+describe("Component Resolution", () => {
+  test("resolves direct imports", () => {
+    // import { CheckboxChild } from './checkbox-child'
+  });
+  
+  test("resolves barrel exports", () => {
+    // export { CheckboxChild as Child } from './checkbox-child'
+  });
+  
+  test("resolves namespace imports", () => {
+    // export * as Checkbox from './barrel-file'
+  });
+  
+  test("resolves aliased imports", () => {
+    // import { Checkbox as MyCheckbox } from "@kunai-consulting/qwik"
+  });
+});
+```
+
+#### **C. Scope Tree Traversal Tests**
+```typescript
+describe("Scope Traversal", () => {
+  test("finds components in deep nested scopes", () => {
+    const code = `
+      function Root() {
+        const hasChild = isComponentPresent(CheckboxChild);
+        return (
+          <div>
+            <OtherComp />
+          </div>
+        );
+      }
+      
+      function OtherComp() {
+        return <div><CheckboxChild /></div>; // Should be found
+      }
+    `;
+  });
+  
+  test("handles slot-based component placement", () => {
+    // Complex nested component scenarios
+  });
+});
+```
+
+#### **D. Component Instance Tracking Tests**
+```typescript
+describe("Instance Tracking", () => {
+  test("tracks multiple instances of same component", () => {
+    const code = `
+      <Root>
+        <CheckboxChild key="1" />
+        <CheckboxChild key="2" />
+        <CheckboxChild key="3" />
+      </Root>
+    `;
+    // Should track all 3 instances
+  });
+  
+  test("scopes analysis per component instance", () => {
+    // Component A has child, Component B doesn't
+  });
+});
+```
+
+#### **E. Transformation Tests**
+```typescript
+describe("Transformation", () => {
+  test("transforms isComponentPresent calls", () => {
+    // Before/after transformation validation
+  });
+  
+  test("injects analyzer props", () => {
+    // Prop injection validation
+  });
+  
+  test("adds props parameter when missing", () => {
+    // Auto props parameter addition
+  });
+});
+```
+
+### **3. Enhanced Test Structure**
+
+```typescript
+// __test__/oxc-analyzer.spec.ts
+describe("OXC Component Presence Analyzer", () => {
+  // Use existing test setup pattern
+  let tempDir: string;
+  
+  beforeAll(() => {
+    tempDir = createTestEnvironment();
+  });
+  
+  describe("Phase 1: Discovery", () => {
+    test("detects root components", () => {
+      // Test enter_call_expression logic
+    });
+  });
+  
+  describe("Phase 2: Resolution", () => {
+    test("resolves symbols via oxc_semantic", () => {
+      // Test semantic analysis integration
+    });
+  });
+  
+  describe("Phase 3: Traversal", () => {
+    test("traverses scope tree with BFS", () => {
+      // Test scope tree navigation
+    });
+  });
+  
+  describe("Phase 4: Instance Tracking", () => {
+    test("tracks component instances", () => {
+      // Test Vec<FoundComponent> logic
+    });
+  });
+  
+  describe("Phase 5: Transformation", () => {
+    test("injects props and transforms calls", () => {
+      // Test exit_* methods
+    });
+  });
+});
+```
+
+### **4. Edge Case Testing**
+
+Based on existing real-world tests, add:
+
+```typescript
+describe("Edge Cases", () => {
+  test("handles external package imports gracefully", () => {
+    // @kunai-consulting/qwik imports
+  });
+  
+  test("resolves tilde alias imports", () => {
+    // ~/components/dummy-comp resolution
+  });
+  
+  test("distinguishes namespace collisions", () => {
+    // Description vs Checkbox.Description
+  });
+  
+  test("handles nested member expressions", () => {
+    // A.B.Component scenarios
+  });
+});
+```
+
+### **5. Performance Testing**
+
+```typescript
+describe("Performance", () => {
+  test("single pass analysis", () => {
+    // Measure traverse count
+  });
+  
+  test("memory efficiency", () => {
+    // Large file handling
+  });
+  
+  test("lazy resolution", () => {
+    // Only resolve when needed
+  });
+});
+```
+
+### **6. Integration with Current Tests**
+
+#### **Keep Existing Patterns**:
+- ✅ **Temp directory setup** - works well for file-based testing
+- ✅ **Before/after transformation validation** - essential for correctness
+- ✅ **Real-world scenario testing** - catches edge cases
+
+#### **Add OXC-Specific Testing**:
+- ✅ **Phase-by-phase validation** - test each traverse phase independently
+- ✅ **Semantic resolution tests** - validate symbol resolution accuracy
+- ✅ **AST transformation tests** - ensure correct direct AST manipulation
+- ✅ **Scope tree tests** - validate BFS traversal logic
+
+#### **Enhanced Test Categories**:
+
+```typescript
+describe("OXC Integration Tests", () => {
+  describe("oxc_traverse Integration", () => {
+    test("enter_* methods collect data correctly", () => {
+      // Test discovery phase
+    });
+    
+    test("exit_* methods transform correctly", () => {
+      // Test transformation phase
+    });
+  });
+  
+  describe("oxc_semantic Integration", () => {
+    test("symbol resolution handles complex imports", () => {
+      // Test automatic import resolution
+    });
+    
+    test("scope tree navigation finds nested components", () => {
+      // Test scope traversal with semantic data
+    });
+  });
+  
+  describe("oxc_codegen Integration", () => {
+    test("direct AST manipulation produces correct output", () => {
+      // Test ctx.ast.* methods
+    });
+    
+    test("code generation preserves formatting", () => {
+      // Test Codegen::build() options
+    });
+  });
+});
+```
+
+### **7. Test Data Management**
+
+#### **Structured Test Cases**:
+```typescript
+const testCases = {
+  discovery: [
+    {
+      name: "single isComponentPresent call",
+      input: `function Root() { const has = isComponentPresent(Child); }`,
+      expected: { rootComponents: 1, presenceChecks: 1 }
+    },
+    {
+      name: "multiple presence checks",
+      input: `function Root() { 
+        const hasChild = isComponentPresent(Child);
+        const hasTitle = isComponentPresent(Title);
+      }`,
+      expected: { rootComponents: 1, presenceChecks: 2 }
+    }
+  ],
+  
+  resolution: [
+    {
+      name: "direct import resolution",
+      imports: `import { Child } from './child'`,
+      jsx: `<Child />`,
+      expected: { resolved: true, symbolId: "Child" }
+    }
+  ],
+  
+  transformation: [
+    {
+      name: "call transformation",
+      before: `isComponentPresent(Child)`,
+      after: `isComponentPresent(Child, props.analyzer_has_child)`,
+      expected: { transformed: true }
+    }
+  ]
+};
+```
+
+### **Key Testing Advantages with OXC**:
+
+- ✅ **Phase Isolation**: Test each traverse phase independently
+- ✅ **Semantic Validation**: Verify symbol resolution accuracy
+- ✅ **AST Precision**: Test direct AST manipulation
+- ✅ **Performance Measurement**: Single-pass analysis validation
+- ✅ **Edge Case Coverage**: Complex import/export scenarios
+- ✅ **Memory Efficiency**: Large file handling tests
+
+This comprehensive testing strategy ensures the OXC-based analyzer is robust, performant, and handles all the complex scenarios identified in the research.
