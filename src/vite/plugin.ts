@@ -57,7 +57,7 @@ export default function qwikAnalyzer(
 			const cleanedId = id.split("?")[0];
 
 			if (
-				(!cleanedId.endsWith(".tsx") && !cleanedId.endsWith(".ts")) ||
+				(!cleanedId.endsWith(".tsx") && !cleanedId.endsWith(".jsx")) ||
 				cleanedId.includes("node_modules")
 			) {
 				return null;
@@ -65,6 +65,8 @@ export default function qwikAnalyzer(
 
 			try {
 				const napi = await getNAPIModule();
+
+				console.log("TRANSFORMING", cleanedId);
 				const transformedCode = napi.transformWithAnalysis(code, cleanedId);
 
 				return transformedCode !== code ? { code: transformedCode } : null;
