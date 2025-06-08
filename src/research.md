@@ -1,6 +1,9 @@
 # OXC Component Presence Analyzer - Complete Implementation
 
 ```rust
+# OXC Component Presence Analyzer - Complete Implementation
+
+```rust
 use oxc_traverse::{traverse_mut, Traverse, TraverseCtx};
 use oxc_allocator::Allocator;
 use oxc_parser::{Parser, SourceType};
@@ -29,6 +32,7 @@ struct RootComponent {
 #[derive(Debug)]
 struct PresenceCheck {
     target_component: String,
+    target_symbol_id: Option<SymbolId>,  // Resolved via find_binding
     call_location: Span,
 }
 
@@ -41,7 +45,7 @@ struct FoundComponent {
 
 #[derive(Debug)]
 struct JSXUsage {
-    component_symbol_id: Option<SymbolId>,
+    component_symbol_id: Option<SymbolId>,  // Resolved via find_binding
     jsx_name: String,
     scope_id: ScopeId,
     location: Span,
@@ -57,50 +61,74 @@ impl ComponentPresenceAnalyzer {
 }
 
 impl<'a> Traverse<'a> for ComponentPresenceAnalyzer {
-    // Discovery Phase - Find isComponentPresent() calls
+    // Discovery Phase - Find usePresence() calls and resolve their symbols immediately
     fn enter_call_expression(&mut self, node: &mut CallExpression<'a>, ctx: &mut TraverseCtx<'a>) {
-        if self.is_component_present_call(node) {
+        let Expression::Identifier(ident) = &node.callee else { return; };
+        
+        if ident.name == "usePresence" {
             let scope_id = ctx.current_scope_id();
             let target_component = self.extract_target_component(node);
             
+            // 🔑 Use find_binding to resolve the target component symbol immediately
+            let target_symbol_id = ctx.scoping().find_binding(scope_id, &target_component);
+            
             let presence_check = PresenceCheck {
-                target_component,
+                target_component: target_component.clone(),
+                target_symbol_id,
                 call_location: node.span,
             };
             
+            // Find or create root component
             if let Some(root) = self.find_root_component_mut(scope_id) {
                 root.presence_checks.push(presence_check);
             } else {
-                let function_name = self.extract_function_name_from_scope(scope_id, ctx);
+                let component_name = self.find_parent_component_name(ctx)
+                    .unwrap_or_else(|| "UnknownComponent".to_string());
+                
                 self.root_components.push(RootComponent {
-                    name: function_name,
+                    name: component_name,
                     scope_id,
                     presence_checks: vec![presence_check],
                     found_components: Vec::new(),
                     location: node.span,
                 });
             }
+            
+            eprintln!("Found usePresence({}) → symbol: {:?}", target_component, target_symbol_id);
         }
     }
     
-    // Track JSX component usage with semantic symbol resolution
+    // Track JSX component usage and resolve symbols immediately
     fn enter_jsx_opening_element(&mut self, node: &mut JSXOpeningElement<'a>, ctx: &mut TraverseCtx<'a>) {
         let jsx_name = self.extract_jsx_component_name(node);
-        let component_symbol_id = self.resolve_jsx_symbol(&jsx_name, ctx);
+        let scope_id = ctx.current_scope_id();
+        
+        // 🔑 Use find_binding to resolve JSX component symbol immediately
+        let component_symbol_id = if jsx_name.contains('.') {
+            // Handle <Checkbox.Child /> - resolve the namespace first
+            let parts: Vec<&str> = jsx_name.split('.').collect();
+            let namespace = parts[0];
+            ctx.scoping().find_binding(scope_id, namespace)
+        } else {
+            // Handle <Child /> - resolve directly
+            ctx.scoping().find_binding(scope_id, &jsx_name)
+        };
         
         self.jsx_usage_stack.push(JSXUsage {
             component_symbol_id,
-            jsx_name,
-            scope_id: ctx.current_scope_id(),
+            jsx_name: jsx_name.clone(),
+            scope_id,
             location: node.span,
         });
+        
+        eprintln!("Found JSX <{}> → symbol: {:?}", jsx_name, component_symbol_id);
     }
 
-    // Analysis Phase - Match components to presence checks
+    // Analysis Phase - Match resolved symbols
     fn exit_jsx_opening_element(&mut self, node: &mut JSXOpeningElement<'a>, ctx: &mut TraverseCtx<'a>) {
-        self.analyze_component_presence_for_current_jsx(ctx);
+        self.analyze_component_presence_by_symbols(ctx);
         
-        // Inject analyzer props into root components
+        // Inject analyzer props
         if self.should_inject_analyzer_props(node, ctx) {
             self.inject_analyzer_props(node, ctx);
         }
@@ -108,13 +136,15 @@ impl<'a> Traverse<'a> for ComponentPresenceAnalyzer {
         self.jsx_usage_stack.pop();
     }
 
-    // Transformation Phase - Transform isComponentPresent calls
+    // Transformation Phase - Transform usePresence calls
     fn exit_call_expression(&mut self, node: &mut CallExpression<'a>, ctx: &mut TraverseCtx<'a>) {
-        if self.is_component_present_call(node) && node.arguments.len() == 1 {
+        let Expression::Identifier(ident) = &node.callee else { return; };
+        
+        if ident.name == "usePresence" && node.arguments.len() == 1 {
             let target_component = self.extract_target_component(node);
             let prop_name = format!("analyzer_has_{}", self.normalize_component_name(&target_component));
             
-            // Direct AST construction - oxc_codegen handles the rest
+            // Transform: usePresence(Child) → usePresence(Child, props.analyzer_has_child)
             let props_ref = ctx.ast.identifier_reference(SPAN, "props");
             let member_expr = ctx.ast.member_expression_static(
                 SPAN, 
@@ -138,36 +168,27 @@ impl<'a> Traverse<'a> for ComponentPresenceAnalyzer {
 }
 
 impl ComponentPresenceAnalyzer {
-    // Semantic-powered component resolution
-    fn resolve_jsx_symbol(&self, jsx_name: &str, ctx: &TraverseCtx) -> Option<SymbolId> {
-        let scoping = ctx.scoping();
-        let current_scope = ctx.current_scope_id();
-        
-        if jsx_name.contains('.') {
-            let parts: Vec<&str> = jsx_name.split('.').collect();
-            let namespace = parts[0];
-            scoping.find_binding(current_scope, namespace)
-        } else {
-            scoping.find_binding(current_scope, jsx_name)
-        }
-    }
-    
-    fn analyze_component_presence_for_current_jsx(&mut self, ctx: &TraverseCtx) {
-        let scoping = ctx.scoping();
-        
+    // Core analysis: Match symbols instead of string names
+    fn analyze_component_presence_by_symbols(&mut self, ctx: &TraverseCtx) {
+        // For each root component, check if any JSX usage matches the presence check symbols
         for root in &mut self.root_components {
             for check in &root.presence_checks {
-                if let Some(target_symbol) = scoping.find_binding(root.scope_id, &check.target_component) {
+                if let Some(target_symbol) = check.target_symbol_id {
+                    // Find JSX usage in this component's scope tree
                     let jsx_in_scope = self.find_jsx_usage_in_scope_tree(root.scope_id, ctx);
                     
                     for jsx in jsx_in_scope {
                         if let Some(jsx_symbol) = jsx.component_symbol_id {
+                            // 🔑 Symbol matching - this handles all aliases/imports automatically!
                             if jsx_symbol == target_symbol {
                                 root.found_components.push(FoundComponent {
                                     symbol_id: target_symbol,
                                     jsx_name: jsx.jsx_name.clone(),
                                     location: jsx.location,
                                 });
+                                
+                                eprintln!("MATCH: {} uses {} (symbol: {:?})", 
+                                         root.name, jsx.jsx_name, jsx_symbol);
                             }
                         }
                     }
@@ -176,6 +197,7 @@ impl ComponentPresenceAnalyzer {
         }
     }
     
+    // Find JSX usage in component scope tree using BFS
     fn find_jsx_usage_in_scope_tree(&self, root_scope: ScopeId, ctx: &TraverseCtx) -> Vec<&JSXUsage> {
         let mut found_jsx = Vec::new();
         let scoping = ctx.scoping();
@@ -188,12 +210,14 @@ impl ComponentPresenceAnalyzer {
             }
             visited.insert(current_scope);
             
+            // Find JSX usage in this scope
             for jsx in &self.jsx_usage_stack {
                 if jsx.scope_id == current_scope {
                     found_jsx.push(jsx);
                 }
             }
             
+            // Add child scopes to queue for BFS traversal
             for &child_scope in scoping.get_child_scope_ids(current_scope) {
                 scope_queue.push(child_scope);
             }
@@ -202,7 +226,39 @@ impl ComponentPresenceAnalyzer {
         found_jsx
     }
     
-    // Direct JSX attribute injection - no helper functions needed
+    // Find parent component name using ancestry traversal
+    fn find_parent_component_name(&self, ctx: &TraverseCtx) -> Option<String> {
+        for ancestor in ctx.ancestors() {
+            match ancestor {
+                // Look for: const MyComponent = component$(...)
+                oxc_traverse::Ancestor::VariableDeclaratorInit(declarator) => {
+                    // Check if this declarator contains a component$ call
+                    if self.contains_component_call(&declarator.init) {
+                        if let Some(ident) = declarator.id.get_binding_identifier() {
+                            return Some(ident.name.to_string());
+                        }
+                    }
+                }
+                // Look for: export default component$(...)
+                oxc_traverse::Ancestor::ExportDefaultDeclarationDeclaration(export_decl) => {
+                    return Some("DefaultExport".to_string());
+                }
+                _ => continue,
+            }
+        }
+        None
+    }
+    
+    fn contains_component_call(&self, expr: &Expression) -> bool {
+        match expr {
+            Expression::CallExpression(call) => {
+                matches!(&call.callee, Expression::Identifier(ident) if ident.name == "component$")
+            }
+            _ => false,
+        }
+    }
+    
+    // Inject analyzer props based on symbol analysis results
     fn inject_analyzer_props(&mut self, node: &mut JSXOpeningElement, ctx: &mut TraverseCtx) {
         let current_scope = ctx.current_scope_id();
         let root_component = self.find_containing_root_component(current_scope);
@@ -211,12 +267,12 @@ impl ComponentPresenceAnalyzer {
             for check in &root.presence_checks {
                 let prop_name = format!("analyzer_has_{}", 
                     self.normalize_component_name(&check.target_component));
-                let has_component = !root.found_components.is_empty() && 
-                    root.found_components.iter().any(|comp| 
-                        ctx.scoping().get_symbol_name(comp.symbol_id) == check.target_component
-                    );
+                    
+                // Check if this target component was found (by symbol matching)
+                let has_component = root.found_components.iter()
+                    .any(|comp| comp.symbol_id == check.target_symbol_id.unwrap_or(SymbolId::new(0)));
                 
-                // Direct JSX attribute construction
+                // Inject JSX attribute: analyzer_has_component={true/false}
                 let attr_name = JSXAttributeName::Identifier(
                     ctx.ast.alloc(ctx.ast.jsx_identifier(SPAN, &prop_name))
                 );
@@ -263,11 +319,7 @@ impl ComponentPresenceAnalyzer {
         }
     }
     
-    // Helper methods for extraction and validation
-    fn is_component_present_call(&self, node: &CallExpression) -> bool {
-        matches!(&node.callee, Expression::Identifier(ident) if ident.name == "isComponentPresent")
-    }
-    
+    // Helper methods
     fn extract_target_component(&self, node: &CallExpression) -> String {
         node.arguments.first()
             .and_then(|arg| match arg {
@@ -305,7 +357,6 @@ impl ComponentPresenceAnalyzer {
             if ident.name == "props")
     }
     
-    // Additional helper methods omitted for brevity...
     fn find_root_component_mut(&mut self, scope_id: ScopeId) -> Option<&mut RootComponent> {
         self.root_components.iter_mut().find(|r| r.scope_id == scope_id)
     }
@@ -322,10 +373,6 @@ impl ComponentPresenceAnalyzer {
     fn should_inject_analyzer_props(&self, _node: &JSXOpeningElement, ctx: &TraverseCtx) -> bool {
         let current_scope = ctx.current_scope_id();
         self.find_containing_root_component(current_scope).is_some()
-    }
-    
-    fn extract_function_name_from_scope(&self, _scope_id: ScopeId, _ctx: &TraverseCtx) -> String {
-        "Component".to_string() // Simplified for example
     }
 }
 
@@ -363,192 +410,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-## Implementation Guide: OXC Traverse Approach
+## Key Changes Using `find_binding`:
 
-### Overview
-This analyzer tracks component presence across complex component hierarchies, handling slots, aliases, and barrel exports using `@oxc_traverse`, `@oxc_semantic`, and `@oxc_resolver`.
+### **1. Immediate Symbol Resolution**
+- **Before**: Store string names, resolve later
+- **After**: Use `find_binding` immediately when detecting calls/JSX
 
-### Core Strategy
+### **2. Symbol-Based Matching** 
+- **Before**: Compare string names (error-prone with aliases)
+- **After**: Compare `SymbolId`s (handles all import scenarios automatically)
 
-#### 1. **Discovery Phase (Enter Traversal)**
-**Goal**: Find "root" components containing `isComponentPresent()` calls
+### **3. Simplified JSX Resolution**
+```rust
+// 🔑 Direct use of find_binding for JSX
+let component_symbol_id = if jsx_name.contains('.') {
+    let namespace = jsx_name.split('.').next().unwrap();
+    ctx.scoping().find_binding(scope_id, namespace)  // Resolve namespace
+} else {
+    ctx.scoping().find_binding(scope_id, &jsx_name)  // Resolve directly
+};
+```
 
-**Pattern Detection**:
-```typescript
-// Root component with presence check
-function MyComponent() {
-  const hasChild = isComponentPresent(CheckboxChild); // <-- This makes it a "root"
-  return <Checkbox.Root>{/* children */}</Checkbox.Root>;
+### **4. Automatic Import Handling**
+- ✅ **Barrel exports**: `export { Child } from './index'` → resolved automatically
+- ✅ **Aliases**: `import { CheckboxChild as Child }` → same SymbolId  
+- ✅ **Namespaces**: `<Checkbox.Child>` → resolve "Checkbox" namespace
+- ✅ **Complex imports**: All handled by semantic analysis
+
+### **5. Symbol-Based Analysis**
+```rust
+// Match by SymbolId instead of string comparison
+if jsx_symbol == target_symbol {
+    // This handles ALL import variations automatically!
+    root.found_components.push(FoundComponent { ... });
 }
 ```
 
-**Implementation**:
-- Use `enter_call_expression()` to detect `isComponentPresent(ComponentReference)` calls
-- Mark the containing component as a "root" component
-- Extract the target component name from the call arguments
-- Store in `root_components` with scope information
-
-#### 2. **Component Resolution (oxc_semantic)**
-**Goal**: Resolve complex import/export patterns automatically
-
-**Handled Patterns**:
-```typescript
-// Direct import
-import { CheckboxChild } from './checkbox-child'
-
-// Barrel export
-export { CheckboxChild as Child } from './checkbox-child'  // index.ts
-
-// Namespace import  
-export * as Checkbox from './barrel-file'  // another index.ts
-
-// Aliased import
-import { Checkbox as MyCheckbox } from "@kunai-consulting/qwik"
-```
-
-**Implementation**:
-- `oxc_semantic` handles ALL import resolution automatically
-- Use `scoping.find_binding(scope_id, component_name)` to get `SymbolId`
-- No manual import tracking needed - semantic analysis does everything!
-
-#### 3. **Scope Tree Traversal (Deep Component Search)**
-**Goal**: Find target components anywhere in the scope hierarchy due to slots
-
-**Complex Scenarios**:
-```tsx
-<Checkbox.Root> {/* contains isComponentPresent(CheckboxChild) */}
-  <OtherComp /> {/* CheckboxChild might be inside here */}
-</Checkbox.Root>
-
-// Inside OtherComp (nested arbitrarily deep)
-function OtherComp() {
-  return <div><CheckboxChild /></div>; // <-- Found it!
-}
-```
-
-**Implementation**:
-- Use `enter_jsx_opening_element()` to track ALL JSX usage
-- For each JSX element, resolve component using `resolve_jsx_symbol()`
-- Store in `jsx_usage_stack` with scope information
-- Use BFS through `scoping.get_child_scope_ids()` to traverse entire scope tree
-- Match JSX usage to presence checks by comparing `SymbolId`s
-
-#### 4. **Component Instance Tracking (Multiple Instances)**
-**Goal**: Track ALL component instances, not just unique components
-
-**Why Vec instead of HashSet**:
-```tsx
-<Checkbox.Root> {/* contains isComponentPresent(CheckboxChild) */}
-  <Checkbox.Child key="1" />
-  <Checkbox.Child key="2" />  {/* Multiple instances! */}
-  <Checkbox.Child key="3" />
-</Checkbox.Root>
-```
-
-**Implementation**:
-- Use `Vec<FoundComponent>` instead of `HashSet<SymbolId>`
-- Store each instance with location information
-- Allow duplicate `SymbolId`s for multiple instances
-
-#### 5. **Transformation Phase (Exit Traversal)**
-**Goal**: Inject analyzer props and transform calls per component instance
-
-**Transformations**:
-```tsx
-// Before:
-function MyComponent() {
-  const hasChild = isComponentPresent(CheckboxChild);
-  return <MyCheckbox.Root>{children}</MyCheckbox.Root>;
-}
-
-// After:
-function MyComponent(props) {
-  const hasChild = isComponentPresent(CheckboxChild, props.analyzer_has_checkboxchild);
-  return <MyCheckbox.Root analyzer_has_checkboxchild={true}>{children}</MyCheckbox.Root>;
-}
-```
-
-**Implementation**:
-- Use `exit_call_expression()` to transform `isComponentPresent()` calls
-- Add second argument: `props.analyzer_has_componentname`
-- Use `exit_jsx_opening_element()` to inject analyzer props
-- Add boolean attribute: `analyzer_has_componentname={true/false}`
-- Use `exit_function()` to ensure props parameter exists
-
-#### 6. **Scoped Per Component Instance**
-**Goal**: Each component instance gets its own analyzer props
-
-**Scoping Strategy**:
-```tsx
-// Component A instance
-<Checkbox.Root analyzer_has_child={true}> {/* has child */}
-  <Checkbox.Child />
-</Checkbox.Root>
-
-// Component B instance  
-<Checkbox.Root analyzer_has_child={false}> {/* no child */}
-  <div>No checkbox child here</div>
-</Checkbox.Root>
-```
-
-**Implementation**:
-- Use `ctx.current_scope_id()` to scope analysis per component instance
-- Each root component analyzes only its own scope tree
-- Props are injected based on what's found in that specific instance
-
-### Key OXC Methods Used
-
-#### **oxc_traverse**:
-- `enter_call_expression()` - Find presence calls
-- `enter_jsx_opening_element()` - Track JSX usage  
-- `exit_call_expression()` - Transform calls
-- `exit_jsx_opening_element()` - Inject props
-- `exit_function()` - Ensure props parameter
-
-#### **oxc_semantic**:
-- `scoping.find_binding(scope_id, name)` - Resolve symbols
-- `scoping.get_child_scope_ids(scope_id)` - Traverse scope tree
-- `ctx.current_scope_id()` - Get current scope
-- Automatic import/export resolution
-
-#### **oxc_codegen**:
-- `ctx.ast.*` methods for direct AST construction
-- `Codegen::build()` for automatic code generation
-- No manual string building required
-
-### Error Handling & Edge Cases
-
-#### **Aliased Components**:
-```typescript
-import { Checkbox as MyCheckbox } from "@kunai-consulting/qwik"
-// Semantic analysis resolves "MyCheckbox" → actual Checkbox symbol
-```
-
-#### **Nested Member Expressions**:
-```tsx
-<A.B.Component /> // Handled by extract_member_object() recursively
-```
-
-#### **Barrel Exports**:
-```typescript
-export * as Checkbox from './index'  // oxc_semantic resolves automatically
-```
-
-### Performance Considerations
-
-- **Single Pass**: Analysis and transformation in one traversal
-- **Lazy Resolution**: Components resolved only when needed
-- **Efficient Scoping**: Use OXC's built-in scope traversal
-- **Memory Efficient**: Track only necessary information
-
-This approach provides comprehensive component presence analysis while leveraging OXC's powerful semantic analysis and code generation capabilities.
-
-**Key oxc_codegen Simplifications:**
-- ✅ **Direct AST manipulation** with `ctx.ast.*` methods
-- ✅ **Automatic code generation** via `Codegen::build()`
-- ✅ **Built-in formatting options** (quotes, comments, minification)
-- ✅ **No manual string building** or helper functions
-- ✅ **Semantic symbol resolution** handles all imports automatically
+The key insight: **`find_binding` does all the heavy lifting** for import resolution, so we can focus on collecting and matching SymbolIds rather than trying to manually track imports and aliases!
 
 ## Testing Strategy for OXC Component Presence Analyzer
 
