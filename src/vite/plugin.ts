@@ -35,7 +35,7 @@ async function getNAPIModule(): Promise<NAPIModule> {
  * @param injectedValue - Optional boolean value injected by qwik-analyzer at build time
  * @returns boolean indicating if the component is present
  */
-export function isComponentPresent<T>(
+export function usePresence<T>(
 	component: unknown,
 	injectedValue?: boolean,
 ): boolean {
@@ -66,7 +66,6 @@ export default function qwikAnalyzer(
 			try {
 				const napi = await getNAPIModule();
 
-				console.log("TRANSFORMING", cleanedId);
 				const transformedCode = napi.transformWithAnalysis(code, cleanedId);
 
 				return transformedCode !== code ? { code: transformedCode } : null;

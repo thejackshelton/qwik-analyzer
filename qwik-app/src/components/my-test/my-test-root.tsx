@@ -1,9 +1,9 @@
 import { component$, Slot } from "@builder.io/qwik";
-import { isComponentPresent } from "../../../../src/vite/plugin";
+import { usePresence } from "../../../../src/vite/plugin";
 import { MyTestChild } from "./my-test-child";
 
 export const MyTestRoot = component$((props) => {
-	const isChild = isComponentPresent(MyTestChild);
+	const isChild = usePresence(MyTestChild);
 
 	console.log("PROPS BRO: ", props);
 

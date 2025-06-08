@@ -5,9 +5,15 @@ import DirectExample from "../examples/direct_example";
 import AliasExample from "../examples/aliased_example";
 import CheckboxExample from "../examples/checkbox";
 import SlotExample from "../examples/slot_example";
+import RandomFile from "~/components/my-test/random-file";
 
 export default component$(() => {
-	return <SlotExample />;
+	return (
+		<>
+			<SlotExample />
+			<RandomFile />
+		</>
+	);
 });
 
 export const head: DocumentHead = {

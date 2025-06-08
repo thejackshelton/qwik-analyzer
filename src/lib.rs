@@ -1,6 +1,7 @@
 use napi_derive::napi;
 use oxc_ast::ast::*;
 use oxc_ast::ast;
+use oxc_syntax::identifier;
 use oxc_traverse::{traverse_mut, Ancestor, Traverse, TraverseCtx};
 use oxc_allocator::Allocator;
 use oxc_span::SourceType;
@@ -20,11 +21,14 @@ struct QwikAnalyzer {
 
 impl<'a> Traverse<'a> for QwikAnalyzer {
   fn enter_call_expression(&mut self, node: &mut ast::CallExpression<'a>, ctx: &mut TraverseCtx<'a>) {
-      if let Expression::Identifier(ident) = &node.callee {
-        if ident.name == "isComponentPresent" {
-          println!("Component present!: ");
-        }
-      }
+      // 
+      let Expression::Identifier(ident) = &node.callee else {
+        return;
+      };
+
+      if ident.name == "component$" {
+        println!("I would pass the check! {:?}", &node)
+      };
   }  
 
 }

@@ -10,6 +10,6 @@ interface QwikAnalyzerOptions {
  * @param injectedValue - Optional boolean value injected by qwik-analyzer at build time
  * @returns boolean indicating if the component is present
  */
-export declare function isComponentPresent<T>(component: unknown, injectedValue?: boolean): boolean;
+export declare function usePresence<T>(component: unknown, injectedValue?: boolean): boolean;
 export default function qwikAnalyzer(options?: QwikAnalyzerOptions): PluginOption;
 export {};
