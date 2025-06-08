@@ -18,14 +18,19 @@ struct QwikAnalyzer {
   root_components: Vec<RootComponent>,
 }
 
+impl QwikAnalyzer {
+  fn find_root_from_presence_check() {
+    
+  }
+}
+
 impl<'a> Traverse<'a> for QwikAnalyzer {
   fn enter_call_expression(&mut self, node: &mut ast::CallExpression<'a>, ctx: &mut TraverseCtx<'a>) {
-      // 
       let Expression::Identifier(ident) = &node.callee else {
         return;
       };
 
-      if ident.name == "component$" {
+      if ident.name == "usePresence" {
         println!("I would pass the check! {:?}", &node)
       };
   }  
