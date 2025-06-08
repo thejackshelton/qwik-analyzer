@@ -29,7 +29,10 @@ impl<'a> Traverse<'a> for QwikAnalyzer {
 
       if ident.name == "component$" {
         self.component_scopes.insert(ctx.current_scope_id());
-      } else if ident.name == "usePresence" {
+        return;
+      } 
+      
+      if ident.name == "usePresence" {
         if let Some(ast::Argument::Identifier(target)) = node.arguments.first() {
           let target_name = target.name.to_string();
 
@@ -42,6 +45,8 @@ impl<'a> Traverse<'a> for QwikAnalyzer {
           }
 
         }
+
+        return;
       };
   }  
 
