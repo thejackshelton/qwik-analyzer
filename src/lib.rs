@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use napi_derive::napi;
 use oxc_ast::ast::*;
 use oxc_ast::ast;
@@ -5,23 +7,18 @@ use oxc_traverse::{traverse_mut, Traverse, TraverseCtx};
 use oxc_allocator::Allocator;
 use oxc_span::SourceType;
 use oxc_parser::{ Parser };
-use oxc_semantic::{ SemanticBuilder, SemanticBuilderReturn };
+use oxc_semantic::{ ScopeId, SemanticBuilder, SemanticBuilderReturn };
 
-struct RootComponent {
-  name: String,
-  presence_checks: Vec<String>,
-  found_components: Vec<String>
-}
+// struct RootComponent {
+//   name: String,
+//   presence_checks: Vec<String>,
+//   found_components: Vec<String>
+// }
 
 
 struct QwikAnalyzer {
-  root_components: Vec<RootComponent>,
-}
-
-impl QwikAnalyzer {
-  fn find_root_from_presence_check() {
-    
-  }
+  component_scopes: HashSet<ScopeId>,
+  root_components: HashMap<ScopeId, String>,
 }
 
 impl<'a> Traverse<'a> for QwikAnalyzer {
@@ -30,8 +27,21 @@ impl<'a> Traverse<'a> for QwikAnalyzer {
         return;
       };
 
-      if ident.name == "usePresence" {
-        println!("I would pass the check! {:?}", &node)
+      if ident.name == "component$" {
+        self.component_scopes.insert(ctx.current_scope_id());
+      } else if ident.name == "usePresence" {
+        if let Some(ast::Argument::Identifier(target)) = node.arguments.first() {
+          let target_name = target.name.to_string();
+
+          for ancestor_scope in ctx.ancestor_scopes() {
+            if self.component_scopes.contains(&ancestor_scope) {
+              println!("Root component in scope {:?} looks for: {}", ancestor_scope, target_name);
+              self.root_components.insert(ancestor_scope, target_name);
+              break;
+            }
+          }
+
+        }
       };
   }  
 
@@ -53,7 +63,8 @@ fn transform_with_analysis(code: String, file_path: String) -> napi::Result<Stri
   }
 
   let mut analyzer = QwikAnalyzer {
-    root_components: Vec::new()
+    component_scopes: HashSet::new(),
+    root_components: HashMap::new()
   };
 
   let scoping = semantic.into_scoping();
