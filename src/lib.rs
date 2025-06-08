@@ -1,12 +1,11 @@
 use napi_derive::napi;
 use oxc_ast::ast::*;
 use oxc_ast::ast;
-use oxc_syntax::identifier;
-use oxc_traverse::{traverse_mut, Ancestor, Traverse, TraverseCtx};
+use oxc_traverse::{traverse_mut, Traverse, TraverseCtx};
 use oxc_allocator::Allocator;
 use oxc_span::SourceType;
-use oxc_parser::{ Parser, ParserReturn };
-use oxc_semantic::{ Semantic, SemanticBuilder, SemanticBuilderReturn };
+use oxc_parser::{ Parser };
+use oxc_semantic::{ SemanticBuilder, SemanticBuilderReturn };
 
 struct RootComponent {
   name: String,
@@ -43,6 +42,10 @@ fn transform_with_analysis(code: String, file_path: String) -> napi::Result<Stri
   let SemanticBuilderReturn {
     semantic, errors: semantic_errors
   } = SemanticBuilder::new().build(&program);
+
+  if !semantic_errors.is_empty() {
+    eprintln!("Qwik Analyzer: Semantic errors found in: {}: {:?}", file_path, semantic_errors);
+  }
 
   let mut analyzer = QwikAnalyzer {
     root_components: Vec::new()
